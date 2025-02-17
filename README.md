@@ -1,10 +1,9 @@
 # CPD Projects
 
-CPD Projects of group T&lt;m&gt;&lt;n&gt;G&lt;p&gt;&lt;q&gt;.
+CPD Projects of group T07G11
 
 Group members:
 
-1. &lt;first name&gt; &lt;family name&gt; (&lt;email address&gt;)
-2. &lt;first name&gt; &lt;family name&gt; (&lt;email address&gt;)
-3. &lt;first name&gt; &lt;family name&gt; (&lt;email address&gt;)
-4. &lt;first name&gt; &lt;family name&gt; (&lt;email address&gt;)
+1. Carlos Filipe Oliveira Sanches Pinto (up202107694@up.pt)
+2. João Maria Correia Rebelo (up202107209@up.pt)
+3. Luís Henrique da Cunha Castanho Gonçalves Ganço  (up202004196@up.pt)
