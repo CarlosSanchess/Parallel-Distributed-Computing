@@ -125,8 +125,56 @@ void OnMultLine(int m_ar, int m_br)
 // add code here for block x block matriz multiplication
 void OnMultBlock(int m_ar, int m_br, int bkSize)
 {
-    
-    
+    SYSTEMTIME Time1, Time2;
+    char st[100];
+    int i, j, k, bi, bj, bk;
+
+    double *pha, *phb, *phc;
+
+    pha = (double *)malloc((m_ar * m_ar) * sizeof(double));
+    phb = (double *)malloc((m_ar * m_ar) * sizeof(double));
+    phc = (double *)malloc((m_ar * m_ar) * sizeof(double));
+
+    for(i=0; i<m_ar; i++)
+        for(j=0; j<m_ar; j++)
+            pha[i*m_ar + j] = (double)1.0;
+
+    for(i=0; i<m_br; i++)
+        for(j=0; j<m_br; j++)
+            phb[i*m_br + j] = (double)(i+1);
+
+    std::fill_n(phc, m_ar * m_ar, 0.0);
+
+    Time1 = clock();
+
+    for(bi = 0; bi < m_ar; bi += bkSize) {
+        for(bj = 0; bj < m_br; bj += bkSize) {
+            for(bk = 0; bk < m_ar; bk += bkSize) {
+                for(i = bi; i < min(bi + bkSize, m_ar); i++) {
+                    for(j = bj; j < min(bj + bkSize, m_br); j++) {
+                        for(k = bk; k < min(bk + bkSize, m_ar); k++) {
+                            phc[i*m_ar + j] += pha[i*m_ar + k] * phb[k*m_br + j];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Time2 = clock();
+    sprintf(st, "Time: %3.3f seconds\n", (double)(Time2 - Time1) / CLOCKS_PER_SEC);
+    cout << st;
+
+    cout << "Result matrix: " << endl;
+    for(i = 0; i < 1; i++) {
+        for(j = 0; j < min(10, m_br); j++)
+            cout << phc[i*m_ar + j] << " ";
+    }
+    cout << endl;
+
+    free(pha);
+    free(phb);
+    free(phc);
 }
 
 
