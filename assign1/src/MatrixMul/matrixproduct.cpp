@@ -201,89 +201,131 @@ void init_papi() {
 
 int main (int argc, char *argv[])
 {
+    char c;
+    int lin, col, blockSize;
+    int op;
+    int n_min, n_max, inc;
+    
+    int EventSet = PAPI_NULL;
+    long long values[2];
+    int ret;
+    
 
-	char c;
-	int lin, col, blockSize;
-	int op;
-	
-	int EventSet = PAPI_NULL;
-  	long long values[2];
-  	int ret;
-	
-
-	ret = PAPI_library_init( PAPI_VER_CURRENT );
-	if ( ret != PAPI_VER_CURRENT )
-		std::cout << "FAIL" << endl;
-
-
-	ret = PAPI_create_eventset(&EventSet);
-		if (ret != PAPI_OK) cout << "ERROR: create eventset" << endl;
+    ret = PAPI_library_init( PAPI_VER_CURRENT );
+    if ( ret != PAPI_VER_CURRENT )
+        std::cout << "FAIL" << endl;
 
 
-	ret = PAPI_add_event(EventSet,PAPI_L1_DCM );
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_L1_DCM" << endl;
+    ret = PAPI_create_eventset(&EventSet);
+    if (ret != PAPI_OK) cout << "ERROR: create eventset" << endl;
 
 
-	ret = PAPI_add_event(EventSet,PAPI_L2_DCM);
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_L2_DCM" << endl;
+    ret = PAPI_add_event(EventSet,PAPI_L1_DCM );
+    if (ret != PAPI_OK) cout << "ERROR: PAPI_L1_DCM" << endl;
 
 
-	op=1;
-	do {
-		cout << endl << "1. Multiplication" << endl;
-		cout << "2. Line Multiplication" << endl;
-		cout << "3. Block Multiplication" << endl;
-		cout << "Selection?: ";
-		cin >>op;
-		if (op == 0)
-			break;
-		printf("Dimensions: lins=cols ? ");
-   		cin >> lin;
-   		col = lin;
+    ret = PAPI_add_event(EventSet,PAPI_L2_DCM);
+    if (ret != PAPI_OK) cout << "ERROR: PAPI_L2_DCM" << endl;
 
 
-		// Start counting
-		ret = PAPI_start(EventSet);
-		if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
+    op=1;
+    do {
+        cout << endl << "1. Multiplication" << endl;
+        cout << "2. Line Multiplication" << endl;
+        cout << "3. Block Multiplication" << endl;
+        cout << "Selection?: ";
+        cin >> op;
+        
+        if (op == 0)
+            break;
+            
+        cout << "Enter minimum matrix dimension (e.g. 100 for a 100x100 matrix): ";
+        cin >> n_min;
+            
+        cout << "Enter maximum matrix dimension (e.g. 1000 for a 1000x1000 matrix): ";
+        cin >> n_max;
+        
+        cout << "Increment?: ";
+        cin >> inc;
 
-		switch (op){
-			case 1: 
-				OnMult(lin, col);
-				break;
-			case 2:
-				OnMultLine(lin, col);  
-				break;
-			case 3:
-				cout << "Block Size? ";
-				cin >> blockSize;
-				OnMultBlock(lin, col, blockSize);  
-				break;
+        switch (op){
+            case 1: 
+                for (int n = n_min; n <= n_max; n += inc) {
+                    cout << "\nDimensions: " << n << "*" << n << endl;
+                    lin = n;
+                    col = n;
+                    
+                    ret = PAPI_start(EventSet);
+                    if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
+                    
+                    OnMult(lin, col);
+                    
+                    ret = PAPI_stop(EventSet, values);
+                    if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
+                    printf("L1 DCM: %lld \n",values[0]);
+                    printf("L2 DCM: %lld \n",values[1]);
+                    
+                    ret = PAPI_reset(EventSet);
+                    if (ret != PAPI_OK) std::cout << "FAIL reset" << endl;
+                }
+                break;
+                
+            case 2:
+                for (int n = n_min; n <= n_max; n += inc) {
+                    cout << "\nDimensions: " << n << "*" << n << endl;
+                    lin = n;
+                    col = n;
+                    
+                    ret = PAPI_start(EventSet);
+                    if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
+                    
+                    OnMultLine(lin, col);
+                    
+                    ret = PAPI_stop(EventSet, values);
+                    if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
+                    printf("L1 DCM: %lld \n",values[0]);
+                    printf("L2 DCM: %lld \n",values[1]);
+                    
+                    ret = PAPI_reset(EventSet);
+                    if (ret != PAPI_OK) std::cout << "FAIL reset" << endl;
+                }
+                break;
+                
+            case 3:
+                cout << "Block Size? ";
+                cin >> blockSize;
+                
+                for (int n = n_min; n <= n_max; n += inc) {
+                    cout << "\nDimensions: " << n << "*" << n << endl;
+                    lin = n;
+                    col = n;
+                    
+                    ret = PAPI_start(EventSet);
+                    if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
+                    
+                    OnMultBlock(lin, col, blockSize);
+                    
+                    ret = PAPI_stop(EventSet, values);
+                    if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
+                    printf("L1 DCM: %lld \n",values[0]);
+                    printf("L2 DCM: %lld \n",values[1]);
+                    
+                    ret = PAPI_reset(EventSet);
+                    if (ret != PAPI_OK) std::cout << "FAIL reset" << endl;
+                }
+                break;
+        }
+    } while (op != 0);
 
-		}
+    ret = PAPI_remove_event(EventSet, PAPI_L1_DCM);
+    if (ret != PAPI_OK)
+        std::cout << "FAIL remove event" << endl; 
 
-  		ret = PAPI_stop(EventSet, values);
-  		if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
-  		printf("L1 DCM: %lld \n",values[0]);
-  		printf("L2 DCM: %lld \n",values[1]);
+    ret = PAPI_remove_event(EventSet, PAPI_L2_DCM);
+    if (ret != PAPI_OK)
+        std::cout << "FAIL remove event" << endl; 
 
-		ret = PAPI_reset( EventSet );
-		if ( ret != PAPI_OK )
-			std::cout << "FAIL reset" << endl; 
-
-
-
-	}while (op != 0);
-
-	ret = PAPI_remove_event( EventSet, PAPI_L1_DCM );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl; 
-
-	ret = PAPI_remove_event( EventSet, PAPI_L2_DCM );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl; 
-
-	ret = PAPI_destroy_eventset( &EventSet );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL destroy" << endl;
-
+    ret = PAPI_destroy_eventset(&EventSet);
+    if (ret != PAPI_OK)
+        std::cout << "FAIL destroy" << endl;
 }
