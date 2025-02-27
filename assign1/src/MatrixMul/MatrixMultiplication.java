@@ -1,6 +1,7 @@
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Scanner;
 
 public class MatrixMultiplication {
 
@@ -100,6 +101,89 @@ public class MatrixMultiplication {
     }
 
     public static void main(String[] args) {
-        // to complete
+        Scanner scanner = new Scanner(System.in);
+        int lin, col, blockSize;
+        int op;
+        int n_min, n_max, inc;
+
+        do {
+            System.out.println("\n1. Multiplication");
+            System.out.println("2. Line Multiplication");
+            System.out.println("3. Block Multiplication");
+            System.out.print("Selection?: ");
+
+            while (!scanner.hasNextInt()) {
+                System.out.println("Invalid input. Please enter a number (1, 2, or 3).");
+                scanner.next(); 
+                System.out.print("Selection?: ");
+            }
+            op = scanner.nextInt();
+
+            if (op == 0) {
+                break;
+            }
+
+            System.out.print("Enter minimum matrix dimension (e.g. 100 for a 100x100 matrix): ");
+            while (!scanner.hasNextInt()) {
+                System.out.println("Invalid input. Please enter an integer for dimensions.");
+                scanner.next();
+                System.out.print("Enter minimum matrix dimension (e.g. 100 for a 100x100 matrix): ");
+            }
+            n_min = scanner.nextInt();
+
+            System.out.print("Enter maximum matrix dimension (e.g. 1000 for a 1000x1000 matrix): ");
+            while (!scanner.hasNextInt()) {
+                System.out.println("Invalid input. Please enter an integer for dimensions.");
+                scanner.next();
+                System.out.print("Enter maximum matrix dimension (e.g. 1000 for a 1000x1000 matrix): ");
+            }
+            n_max = scanner.nextInt();
+
+            System.out.print("Increment?: ");
+            while (!scanner.hasNextInt()) {
+                System.out.println("Invalid input. Please enter an integer for Increment.");
+                scanner.next(); 
+                System.out.print("Increment?: ");
+            }
+            inc = scanner.nextInt();
+
+            switch (op) {
+                case 1:
+                    for (int n = n_min; n <= n_max; n += inc) {
+                        System.out.println("\nDimensions: " + n + "*" + n);
+                        lin = n;
+                        col = n;
+                        OnMult(lin, col);
+                    }
+                    break;
+                case 2:
+                    for (int n = n_min; n <= n_max; n += inc) {
+                        System.out.println("\nDimensions: " + n + "*" + n);
+                        lin = n;
+                        col = n;
+                        OnMultLine(lin, col);
+                    }
+                    break;
+                case 3:
+                    System.out.print("Block Size?: ");
+                    while (!scanner.hasNextInt()) {
+                        System.out.println("Invalid input. Please enter an integer for block size.");
+                        scanner.next(); 
+                        System.out.print("Block Size?: ");
+                    }
+                    blockSize = scanner.nextInt();
+                    for (int n = n_min; n <= n_max; n += inc) {
+                        System.out.println("\nDimensions: " + n + "*" + n);
+                        lin = n;
+                        col = n;
+                        OnMultBlock(lin, col, blockSize);
+                    }
+                    break;
+                default:
+                    System.out.println("Invalid option. Please try again.");
+            }
+        } while (op != 0);
+
+        scanner.close();
     }
 }
