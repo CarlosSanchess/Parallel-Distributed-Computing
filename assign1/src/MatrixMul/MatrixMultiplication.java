@@ -97,7 +97,53 @@ public class MatrixMultiplication {
     }
 
     public static void OnMultBlock(int m_ar, int m_br, int bkSize) {
-        // to complete
+        Instant start, end;
+        int i, j, k, bi, bj, bk;
+
+        double[][] pha = new double[m_ar][m_ar];
+        double[][] phb = new double[m_br][m_br];
+        double[][] phc = new double[m_ar][m_br];
+
+        for (i = 0; i < m_ar; i++) {
+            Arrays.fill(pha[i], 1.0);
+        }
+
+        for (i = 0; i < m_br; i++) {
+            for (j = 0; j < m_br; j++) {
+                phb[i][j] = (double) (i + 1);
+            }
+        }
+
+        for (i = 0; i < m_ar; i++) {
+            Arrays.fill(phc[i], 0.0);
+        }
+
+        start = Instant.now();
+
+        for (bi = 0; bi < m_ar; bi += bkSize) {
+            for (bj = 0; bj < m_br; bj += bkSize) {
+                for (bk = 0; bk < m_ar; bk += bkSize) {
+                    for (i = bi; i < Math.min(bi + bkSize, m_ar); i++) {
+                        for (j = bj; j < Math.min(bj + bkSize, m_br); j++) {
+                            for (k = bk; k < Math.min(bk + bkSize, m_ar); k++) {
+                                phc[i][j] += pha[i][k] * phb[k][j];
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        end = Instant.now();
+        System.out.printf("Time: %.3f seconds\n", Duration.between(start, end).toMillis() / 1000.0);
+
+        System.out.println("Result matrix: ");
+        for (i = 0; i < 1; i++) {
+            for (j = 0; j < Math.min(10, m_br); j++) {
+                System.out.print(phc[i][j] + " ");
+            }
+        }
+        System.out.println();
     }
 
     public static void main(String[] args) {
