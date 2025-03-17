@@ -3,6 +3,10 @@
 \usepackage{float}
 \usepackage{caption}
 \usepackage{listings}
+\usepackage{geometry}
+
+\geometry{left=1.8cm, top=1cm, right=1.8cm, bottom=1cm, footskip=.5cm}
+
 
 
 \title{Parallel and Distributed Computing - First Project Report - FEUP 24/25 - 2nd Semester} 
@@ -18,12 +22,13 @@ Luís Ganço, up202004196
 \begin{document}
 
 \newpage 
+\vspace{0.in}
 
 \maketitle
 \begin{center}
     \large \textit{Project Theme:} Performance Comparison of Single-Core and Multi-Core Systems
 \end{center}
-\newpage
+\vspace{1.3in}
 % Add the table of contents (index)
 \tableofcontents
 \newpage % Start a new page after the table of contents
@@ -117,7 +122,7 @@ This combination of metrics allowed us to assess not only how fast the algorithm
 
 \section{Results and Analysis}
 
-\textbf{Note:} The following results were obtained using the AMD Ryzen 7 7730U processor.
+\textbf{Note:} The following results were obtained using an AMD Ryzen 7 7730U processor and Linux as the operating system (Ubuntu 24.04).
 
 \subsection{Single-Core}
 
@@ -125,7 +130,7 @@ This combination of metrics allowed us to assess not only how fast the algorithm
 
 \begin{table}[H]
 \centering
-\caption{C++ Performance Results}
+\caption*{\textbf{ Table 1: C++ Performance Results}}
 \begin{tabular}{||c | c | c | c | c||} 
  \hline
  \textbf{Dimensions} & \textbf{Execution Time (s)} & \textbf{GFlops} & \textbf{L1 DCM} & \textbf{L2 DCM} \\  
@@ -149,7 +154,7 @@ This combination of metrics allowed us to assess not only how fast the algorithm
 
 \begin{table}[H]
 \centering
-\caption{Java Performance Results}
+\caption*{\textbf{ Table 2: Java Performance Results}}
 \begin{tabular}{||c | c | c||} 
  \hline
  \textbf{Dimensions} & \textbf{Execution Time (s)} & \textbf{GFlops} \\  
@@ -185,7 +190,7 @@ After comparing the performance results of C++ and Java, it is clear that C++ is
     \begin{minipage}{0.32\textwidth}
         \centering
         \includegraphics[width=\textwidth]{Figure_2.png}
-        \caption{\small GFlops comparison}
+        \caption{\small Line-by-Line GFlops Comparison}
         \label{fig:flops}
     \end{minipage}
     \hfill
@@ -212,7 +217,8 @@ Figure 1 supports our initial observation, while Figures 2 and 3 provide valuabl
 
 \begin{table}[H]
 \centering
-\caption{C++ Line-by-Line Performance Results}
+\caption*{\textbf{ Table 3: C++ Line-by-Line Performance Results}}
+
 \begin{tabular}{||c | c | c | c | c||} 
  \hline
  \textbf{Dimensions} & \textbf{Execution Time (s)} & \textbf{GFlops} & \textbf{L1 DCM} & \textbf{L2 DCM} \\  
@@ -236,7 +242,7 @@ Figure 1 supports our initial observation, while Figures 2 and 3 provide valuabl
 
 \begin{table}[H]
 \centering
-\caption{Java Line-by-Line Performance Results}
+\caption*{\textbf{ Table 4: Java Line-by-Line Performance Results}}
 \begin{tabular}{||c | c | c||} 
  \hline
  \textbf{Dimensions} & \textbf{Execution Time (s)} & \textbf{GFlops} \\  
@@ -266,29 +272,31 @@ After analyzing the performance results of C++ and Java for line-by-line matrix 
         \centering
         \includegraphics[width=\textwidth]{Figure_4.png}
         \caption{\small Line-by-Line Execution Time Comparison}
-        \label{fig:execution_time_lineByline}
+        \label{fig:execution_time_linebyline}
     \end{minipage}
     \hfill
     \begin{minipage}{0.32\textwidth}
         \centering
         \includegraphics[width=\textwidth]{Figure_5.png}
         \caption{\small Line-by-Line GFlops Comparison}
-        \label{fig:flops_lineByline}
+        \label{fig:flops_linebyline}
     \end{minipage}
     \hfill
     \begin{minipage}{0.32\textwidth}
         \centering
         \includegraphics[width=\textwidth]{Figure_6.png}
-        \caption{\small C++ Line-by-Line DCM Comparison}
-        \label{fig:cache_misses_lineByline}
+        \caption{\small C++ DCM Comparison}
+        \label{fig:cache_misses_linebyline}
     \end{minipage}
 \end{figure}
+
 
 Additionally, it was asked to register the processing time from 4096x4096 to 10240x10240 with intervals of 2048 in the C++ version:
 
 \begin{table}[H]
 \centering
-\caption{C++ Line-by-Line Bigger Matrices Performance Results}
+
+\caption*{\textbf{Table 5: C++ Line-by-Line Bigger Matrices Performance Results}}
 \begin{tabular}{||c | c | c | c | c||} 
  \hline
  \textbf{Dimensions} & \textbf{Execution Time (s)} & \textbf{GFlops} & \textbf{L1 DCM} & \textbf{L2 DCM} \\  
@@ -316,7 +324,7 @@ For line-by-line multiplication:
 
 \begin{table}[H]
 \centering
-\caption{C++ Block Multiplication Performance Results (Block Sizes: 128, 256, 512)}
+\caption*{\textbf{Table 6: C++ Block Multiplication Performance Results (Block Sizes: 128, 256, 512)}}
 \begin{tabular}{||c | c | c | c | c | c||} 
  \hline
  \textbf{Block Size} & \textbf{Dimensions} & \textbf{Execution Time (s)} & \textbf{GFlops} & \textbf{L1 DCM} & \textbf{L2 DCM} \\  
@@ -348,7 +356,7 @@ For line-by-line multiplication:
 \end{tabular}
 \end{table}
 
-\textbf{Note:} The \textbf{-} symbol indicates that the execution was canceled due to excessively long execution times.
+\textbf{Note:} The "\textbf{-}" symbol indicates that the execution was canceled due to excessively long execution times.
 \begin{itemize}
     \item Block multiplication shows poor scalability for large matrices (8192x8192 and 10240x10240);
     \item Execution times grow exponentially with matrix size, making it impractical for large-scale computations without optimization. For example, the executions for 8192x8192 and 10240x10240 with block sizes 128 and 512 were canceled due to excessively long execution times, which was sufficient to conclude that block multiplication is computationally expensive for very large matrices;
@@ -358,6 +366,135 @@ For line-by-line multiplication:
 
 \subsection{Multi-Core}
 
+\begin{table}[H]
+\centering
+\caption*{\textbf{Table 7: C++ Line-by-Line Performance Results (Outer Loop Parallelization)}}
+\begin{tabular}{||c | c | c | c | c | c||} 
+ \hline
+ \textbf{Dimensions} & \textbf{Execution Time (s)} & \textbf{L1 DCM} & \textbf{L2 DCM} & \textbf{FP OPS} & \textbf{TOT INS} \\  
+ \hline \hline
+ 600x600  & 0.027   & 1924091   & 17330   & 27360001   & 113622169    \\  
+ \hline
+ 1000x1000 & 0.116   & 9370417   & 60217   & 126000001   & 511795717  \\  
+ \hline
+ 1400x1400 & 0.277   & 41090728   & 104111   & 344960001   & 1392538475 \\  
+ \hline
+ 1800x1800 & 0.528   & 90382230   & 149096   & 732240001   & 2949387953 \\  
+ \hline
+ 2200x2200 & 1.131   & 167081583   & 236023   & 1335840001   & 5372806495 \\  
+ \hline
+ 2600x2600 & 2.086   & 280300693   & 555219   & 2203760001   & 8855308697 \\  
+ \hline
+ 3000x3000 & 3.559   & 429083491   & 898157   & 3384000001   & 13588892279 \\  
+ \hline
+ 4096x4096 & 8.299   & 1091464928   & 2332638   & 8589934593   & 34454331821 \\  
+ \hline
+ 6144x6144 & 30.345   & 3683033942   & 9221214   & 28991029286   & 116178953875 \\  
+ \hline
+ 8192x8192 & 73.170   & 8723285628   & 27789743   & 68719476737   & 275258134329 \\  
+ \hline
+ 10240x10240 & 216.851   & 16994047992   & 131991061   & 134217736591   & 537461781358 \\  
+ \hline
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption*{\textbf{Table 8: C++ Line-by-Line Performance Results (Inner Loop Parallelization)}}
+\begin{tabular}{||c | c | c | c | c | c||} 
+ \hline
+ \textbf{Dimensions} & \textbf{Execution Time (s)} & \textbf{L1 DCM} & \textbf{L2 DCM} & \textbf{FP OPS} & \textbf{TOT INS} \\  
+ \hline \hline
+ 600x600  & 0.170   & 4303194   & 2220916   & 27360001   & 176516701    \\  
+ \hline
+ 1000x1000 & 0.458   & 19228602   & 5246945   & 126000001   & 622628615  \\  
+ \hline
+ 1400x1400 & 1.340   & 47916291   & 13397481   & 344960001   & 1649689186 \\  
+ \hline
+ 1800x1800 & 2.950   & 93257787   & 34408060   & 732240001   & 3495964625 \\  
+ \hline
+ 2200x2200 & 5.079   & 150167551   & 125759014   & 1335840001   & 6020016060 \\  
+ \hline
+ 2600x2600 & 7.828   & 225078374   & 197407259   & 2203760001   & 9385227382 \\  
+ \hline
+ 3000x3000 & 11.612   & 327859145   & 303356737   & 3384000001   & 14234349974 \\  
+ \hline
+ 4096x4096 & 27.848   & 856407327   & 657927564   & 8589934593   & 35654285153 \\  
+ \hline
+ 6144x6144 & 73.143   & 2636101874   & 1002581155   & 28991029249   & 116461371453 \\  
+ \hline
+ 8192x8192 & 152.773   & 6077988446   & 1439078099   & 68719476737   & 269361045658 \\  
+ \hline
+ 10240x10240 & 285.668   & 12285236091   & 1986263686   & 134217728001   & 514585201807 \\  
+ \hline
+\end{tabular}
+\end{table}
+
+Relevant plots:
+
+\begin{figure}[H]
+    \centering
+    \begin{minipage}{0.48\textwidth} % First row, first image (additional image)
+        \centering
+        \includegraphics[width=\textwidth]{Figure_7.png} % Replace with your fifth image
+        \caption{\small Parallel Execution Tine Comparison}
+        \label{fig:execution_time_parallel}
+    \end{minipage}
+    \hfill
+    \begin{minipage}{0.48\textwidth} % First row, second image
+        \centering
+        \includegraphics[width=\textwidth]{Figure_8.png} % Replace with your first image
+        \caption{\small Outer Parallelization L1 vs L2 DCM Comparison}
+        \label{fig:cache_misses_parallel1}
+    \end{minipage}
+    \vspace{0.5cm} % Add vertical space between rows
+
+    \begin{minipage}{0.48\textwidth} % Second row, first image
+        \centering
+        \includegraphics[width=\textwidth]{Figure_9.png} % Replace with your second image
+        \caption{\small Inner Parallelization L1 vs L2 DCM Comparison}
+        \label{fig:cache_misses_parallel2}
+    \end{minipage}
+    \hfill
+    \begin{minipage}{0.48\textwidth} % Second row, second image
+        \centering
+        \includegraphics[width=\textwidth]{Figure_10.png} % Replace with your third image
+        \caption{\small Parallel FP OPS Comparison}
+        \label{fig:fp_ops}
+    \end{minipage}
+
+    \begin{minipage}{0.48\textwidth} % Third row, centered single image
+        \centering
+        \includegraphics[width=\textwidth]{Figure_11.png} % Replace with your fourth image
+        \caption{\small Parallel TOT INS Comparison}
+        \label{fig:tot_ins}
+    \end{minipage}
+\end{figure}
+
+After analyzing the execution time, cache performance, floating-point operations, and instruction count across different parallelization strategies, we can draw the following conclusions:
+
+
+\textbf{Outer Loop Parallelization} is the better approach for larger matrix computations due to:
+
+\begin{itemize}
+    \item Faster execution time with lower computational overhead.
+    \item Better cache efficiency, reducing L1 misses.
+    \item Fewer floating-point operations and total instructions.
+    \item Improved scalability with increasing matrix size.
+\end{itemize}
+
+\textbf{Inner Loop Parallelization} is less efficient for large matrices, leading to:
+
+\begin{itemize}
+    \item Higher cache misses and inefficient memory access.
+    \item Increased synchronization overhead and poor scalability.
+    \item Higher instruction count and computational redundancy.
+\end{itemize}
+
+\textbf{Verdict:} Outer loop parallelization is the preferred method for performance and scalability.
+
 \section{Conclusions}
+
+This project provided a comprehensive performance analysis of matrix multiplication algorithms on both single-core and multi-core architectures. The results highlighted the critical role of memory hierarchy and cache efficiency in computational performance. In single-core execution, C++ consistently outperformed Java for larger matrix sizes due to better memory management and lower runtime overhead. Java, on the other hand, leveraged JIT optimizations to achieve better performance for smaller matrices. However, Java's efficiency dropped significantly as the matrix size increased due to higher memory overhead and garbage collection impacts. In multi-core execution, outer loop parallelization proved to be the more efficient strategy, offering better execution time, cache utilization, and computational efficiency. On the other hand, inner loop parallelization exhibited higher cache misses and synchronization overhead, making it less suitable for large-scale computations. Regarding block-oriented matrix multiplication, it did not scale well for larger matrices, with exponentially increasing execution times and suboptimal GFLOPS performance, primarily due to poor cache utilization. Overall, the findings emphasized that hardware-conscious optimizations are crucial for improving matrix multiplication performance. Additionally, choosing the right parallelization strategy is essential for maximizing efficiency, particularly when working with large datasets on modern multi-core processors.
 
 \end{document}

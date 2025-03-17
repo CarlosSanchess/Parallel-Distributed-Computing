@@ -152,8 +152,8 @@ int main() {
 
     op = 1;
     do {
-        cout << endl << "1. 1st parallel solution" << endl;
-        cout << "2. 2nd parallel solution" << endl;
+        cout << endl << "1. 1st parallel solution (Outer Loop)" << endl;
+        cout << "2. 2nd parallel solution (Inner Loop)" << endl;
         cout << "0. Exit" << endl;
         cout << "Selection?: ";
         cin >> op;
