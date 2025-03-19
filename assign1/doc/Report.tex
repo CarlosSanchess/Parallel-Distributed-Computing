@@ -9,7 +9,7 @@
 
 
 
-\title{Parallel and Distributed Computing - First Project Report - FEUP 24/25 - 2nd Semester} 
+\title{Parallel and Distributed Computing - First Project Report \\ FEUP 24/25 - 2nd Semester} 
 
 \author{
 Turma 07 Grupo 11 \\
@@ -317,7 +317,7 @@ For line-by-line multiplication:
 \begin{itemize}
     \item C++ is more efficient for large matrix computations, maintaining consistent performance (around 3.6-3.9 GFLOPS) as matrix size increases, thanks to better memory management and lower runtime overhead.
     \item Java performs well for small matrices, achieving higher GFLOPS (e.g., 4.75 GFLOPS at 600x600) due to effective JIT optimization, but its performance degrades significantly as the matrix size grows, likely due to higher memory overhead and garbage collection;
-    \item Cache performance is a key factor, with increasing cache misses correlating with longer execution times, but Java's performance drop is also influenced by its runtime overhead.
+    \item Cache performance is a key factor in execution time, as a higher number of cache misses leads to increased memory access delays. When a cache miss occurs, the processor must retrieve data from slower/lower cache layers or main memory, consuming extra clock cycles. Additionally, Java's performance is further impacted by its runtime overhead, including Just-In-Time (JIT) compilation and garbage collection.
 \end{itemize}
 
 \subsubsection{Block-Oriented Matrix Multiplication}
@@ -495,6 +495,7 @@ After analyzing the execution time, cache performance, floating-point operations
 
 \section{Conclusions}
 
-This project provided a comprehensive performance analysis of matrix multiplication algorithms on both single-core and multi-core architectures. The results highlighted the critical role of memory hierarchy and cache efficiency in computational performance. In single-core execution, C++ consistently outperformed Java for larger matrix sizes due to better memory management and lower runtime overhead. Java, on the other hand, leveraged JIT optimizations to achieve better performance for smaller matrices. However, Java's efficiency dropped significantly as the matrix size increased due to higher memory overhead and garbage collection impacts. In multi-core execution, outer loop parallelization proved to be the more efficient strategy, offering better execution time, cache utilization, and computational efficiency. On the other hand, inner loop parallelization exhibited higher cache misses and synchronization overhead, making it less suitable for large-scale computations. Regarding block-oriented matrix multiplication, it did not scale well for larger matrices, with exponentially increasing execution times and suboptimal GFLOPS performance, primarily due to poor cache utilization. Overall, the findings emphasized that hardware-conscious optimizations are crucial for improving matrix multiplication performance. Additionally, choosing the right parallelization strategy is essential for maximizing efficiency, particularly when working with large datasets on modern multi-core processors.
+
+ \par The results highlighted the critical role of memory hierarchy and cache efficiency in computational performance.\par In single-core execution, C++ consistently outperformed Java for larger matrix sizes due to better memory management and lower runtime overhead. Java, on the other hand, leveraged JIT(Just In Time) optimizations to achieve better performance for smaller matrices. However, Java's efficiency dropped significantly as the matrix size increased due to higher memory overhead and garbage collection impacts. \par In multi-core execution, outer loop parallelization proved to be the more efficient strategy, offering better execution time, cache utilization, and computational efficiency. On the other hand, inner loop parallelization exhibited higher cache misses and synchronization overhead, making it less suitable for large-scale computations.\par Regarding block-oriented matrix multiplication, it did not scale well for larger matrices, with exponentially increasing execution times and suboptimal GFLOPS performance, primarily due to poor cache utilization. \par Overall, the findings emphasized that hardware-conscious optimizations are crucial for improving matrix multiplication performance. Additionally, choosing the right parallelization strategy is essential for maximizing efficiency, particularly when working with large datasets on modern multi-core processors.
 
 \end{document}
