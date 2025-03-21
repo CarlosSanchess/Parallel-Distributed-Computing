@@ -41,6 +41,13 @@ public class MatrixMultiplication {
         end = Instant.now();
         System.out.printf("Time: %.3f seconds\n", Duration.between(start, end).toMillis() / 1000.0);
 
+        // Calculate GFLOPs
+        double flops = 2.0 * m_ar * m_ar * m_ar;
+        double timeInSeconds = Duration.between(start, end).toMillis() / 1000.0;
+        double gflops = flops / (timeInSeconds * 1e9);
+
+        System.out.printf("Performance: %.2f GFLOPS\n", gflops);
+
         System.out.println("Result matrix: ");
         for (i = 0; i < 1; i++) {
             for (j = 0; j < Math.min(10, m_br); j++) {
@@ -86,6 +93,13 @@ public class MatrixMultiplication {
 
         end = Instant.now();
         System.out.printf("Time: %.3f seconds\n", Duration.between(start, end).toMillis() / 1000.0);
+
+        // Calculate GFLOPs
+        double flops = 2.0 * m_ar * m_ar * m_ar;
+        double timeInSeconds = Duration.between(start, end).toMillis() / 1000.0;
+        double gflops = flops / (timeInSeconds * 1e9);
+
+        System.out.printf("Performance: %.2f GFLOPS\n", gflops);
 
         System.out.println("Result matrix: ");
         for (i = 0; i < 1; i++) {
@@ -136,6 +150,13 @@ public class MatrixMultiplication {
 
         end = Instant.now();
         System.out.printf("Time: %.3f seconds\n", Duration.between(start, end).toMillis() / 1000.0);
+
+        // Calculate GFLOPs
+        double flops = 2.0 * m_ar * m_ar * m_ar;
+        double timeInSeconds = Duration.between(start, end).toMillis() / 1000.0;
+        double gflops = flops / (timeInSeconds * 1e9);
+
+        System.out.printf("Performance: %.2f GFLOPS\n", gflops);
 
         System.out.println("Result matrix: ");
         for (i = 0; i < 1; i++) {

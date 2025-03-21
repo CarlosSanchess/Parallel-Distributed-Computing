@@ -1,19 +1,16 @@
 #include <stdio.h>
 #include <iostream>
 #include <iomanip>
-#include <time.h>
 #include <cstdlib>
 #include <papi.h>
-#include <chrono>
+#include <omp.h>
+#include <chrono> // For high-resolution timing
 
 using namespace std;
-
-#define SYSTEMTIME clock_t
 
 // Parallel matrix multiplication (outer loop parallelized)
 void OnMultLineParallelOuter(int m_ar, int m_br)
 {
-    SYSTEMTIME Time1, Time2;
     char st[100];
     int i, j, k;
 
@@ -23,6 +20,7 @@ void OnMultLineParallelOuter(int m_ar, int m_br)
     phb = (double *)malloc((m_ar * m_ar) * sizeof(double));
     phc = (double *)malloc((m_ar * m_ar) * sizeof(double));
 
+    // Initialize matrices
     for(i = 0; i < m_ar; i++)
         for(j = 0; j < m_ar; j++)
             pha[i * m_ar + j] = (double)1.0;
@@ -33,9 +31,11 @@ void OnMultLineParallelOuter(int m_ar, int m_br)
 
     std::fill_n(phc, m_ar * m_ar, 0.0);
 
-    Time1 = clock();
+    // Start wall-clock timer
+    auto start = std::chrono::high_resolution_clock::now();
 
-    #pragma omp parallel for
+    // Parallelize the outer loop
+    #pragma omp parallel for private(j, k)
     for(i = 0; i < m_ar; i++) {
         for(k = 0; k < m_ar; k++) {
             for(j = 0; j < m_br; j++) {
@@ -44,8 +44,11 @@ void OnMultLineParallelOuter(int m_ar, int m_br)
         }
     }
 
-    Time2 = clock();
-    sprintf(st, "Time: %3.3f seconds\n", (double)(Time2 - Time1) / CLOCKS_PER_SEC);
+    // Stop wall-clock timer
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+
+    sprintf(st, "Time: %3.3f seconds\n", elapsed.count());
     cout << st;
 
     cout << "Result matrix: " << endl;
@@ -63,7 +66,6 @@ void OnMultLineParallelOuter(int m_ar, int m_br)
 // Parallel matrix multiplication (inner loop parallelized)
 void OnMultLineParallelInner(int m_ar, int m_br)
 {
-    SYSTEMTIME Time1, Time2;
     char st[100];
     int i, j, k;
 
@@ -73,6 +75,7 @@ void OnMultLineParallelInner(int m_ar, int m_br)
     phb = (double *)malloc((m_ar * m_ar) * sizeof(double));
     phc = (double *)malloc((m_ar * m_ar) * sizeof(double));
 
+    // Initialize matrices
     for(i = 0; i < m_ar; i++)
         for(j = 0; j < m_ar; j++)
             pha[i * m_ar + j] = (double)1.0;
@@ -83,9 +86,11 @@ void OnMultLineParallelInner(int m_ar, int m_br)
 
     std::fill_n(phc, m_ar * m_ar, 0.0);
 
-    Time1 = clock();
+    // Start wall-clock timer
+    auto start = std::chrono::high_resolution_clock::now();
 
-    #pragma omp parallel
+    // Parallelize the inner loop
+    #pragma omp parallel private(i, k)
     {
         for(i = 0; i < m_ar; i++) {
             for(k = 0; k < m_ar; k++) {
@@ -97,8 +102,11 @@ void OnMultLineParallelInner(int m_ar, int m_br)
         }
     }
 
-    Time2 = clock();
-    sprintf(st, "Time: %3.3f seconds\n", (double)(Time2 - Time1) / CLOCKS_PER_SEC);
+    // Stop wall-clock timer
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = end - start;
+
+    sprintf(st, "Time: %3.3f seconds\n", elapsed.count());
     cout << st;
 
     cout << "Result matrix: " << endl;
@@ -115,126 +123,118 @@ void OnMultLineParallelInner(int m_ar, int m_br)
 
 int main() {
     char c;
-	int lin, col, blockSize;
-	int op;
-	int n_min, n_max, inc;
-	
-	int EventSet = PAPI_NULL;
-  	long long values[5];
-  	int ret;
-	
-	ret = PAPI_library_init( PAPI_VER_CURRENT );
-	if ( ret != PAPI_VER_CURRENT )
-		std::cout << "FAIL" << endl;
+    int lin, col, blockSize;
+    int op;
+    int n_min, n_max, inc;
 
+    int EventSet = PAPI_NULL;
+    long long values[4]; // Updated to 4 events
+    int ret;
 
-	ret = PAPI_create_eventset(&EventSet);
-	if (ret != PAPI_OK) cout << "ERROR: create eventset" << endl;
+    ret = PAPI_library_init(PAPI_VER_CURRENT);
+    if (ret != PAPI_VER_CURRENT)
+        std::cout << "FAIL" << endl;
 
-	ret = PAPI_add_event(EventSet,PAPI_L1_DCM );
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_L1_DCM" << endl;
+    ret = PAPI_create_eventset(&EventSet);
+    if (ret != PAPI_OK) cout << "ERROR: create eventset" << endl;
 
-	ret = PAPI_add_event(EventSet,PAPI_L2_DCM);
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_L2_DCM" << endl;
-	
-	ret = PAPI_add_event(EventSet,PAPI_L3_LDM);
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_L3_LDM" << endl;
-	
-	ret = PAPI_add_event(EventSet,PAPI_DP_OPS);
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_DP_OPS" << endl;
-	
-	ret = PAPI_add_event(EventSet,PAPI_TOT_INS);
-	if (ret != PAPI_OK) cout << "ERROR: PAPI_TOT_INS" << endl;
+    ret = PAPI_add_event(EventSet, PAPI_L1_DCM);
+    if (ret != PAPI_OK) cout << "ERROR: PAPI_L1_DCM" << endl;
 
-	op=1;
-	do {
-		cout << endl << "1. 1st parallel solution" << endl;
-		cout << "2. 2nd parallel solution" << endl;
-		cout << "0. Exit" << endl;
-		cout << "Selection?: ";
-		cin >> op;
-		if (op == 0)
-			break;
+    ret = PAPI_add_event(EventSet, PAPI_L2_DCM);
+    if (ret != PAPI_OK) cout << "ERROR: PAPI_L2_DCM" << endl;
 
-		cout << endl << "Minimum dimension: lins=cols?: ";
-		cin >> n_min;
-		cout << endl << "Maximum dimension: lins=cols?: ";
-		cin >> n_max;
-		cout << endl << "Step?: ";
-		cin >> inc;
-		cout << endl;
+    ret = PAPI_add_event(EventSet, PAPI_FP_OPS);
+    if (ret != PAPI_OK) cout << "ERROR: PAPI_FP_OPS" << endl;
 
-		switch (op){
-			case 1: 
-				for (int n = n_min; n <= n_max; n+=inc) {
-					ret = PAPI_start(EventSet);
-					if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
-					
-					cout << endl << "Dimensions: " << n << '*' << n << endl;
-					lin = n;
-					col = n;
-					OnMultLineParallelOuter(lin, col);
-					
-					ret = PAPI_stop(EventSet, values);
-			  		if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
-			  		printf("L1 DCM: %lld \n",values[0]);
-			  		printf("L2 DCM: %lld \n",values[1]);
-			  		printf("L3 LDM: %lld \n",values[2]);
-			  		printf("DP OPS: %lld \n",values[3]);
-			  		printf("TOT INS: %lld \n", values[4]);
+    ret = PAPI_add_event(EventSet, PAPI_TOT_INS);
+    if (ret != PAPI_OK) cout << "ERROR: PAPI_TOT_INS" << endl;
 
-					ret = PAPI_reset( EventSet );
-					if ( ret != PAPI_OK )
-						std::cout << "FAIL reset" << endl; 
-				}
-				break;
-			case 2:
-				for (int n = n_min; n <= n_max; n+=inc) {
-					ret = PAPI_start(EventSet);
-					if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
-					
-					cout << endl << "Dimensions: " << n << '*' << n << endl;
-					lin = n;
-					col = n;
-					OnMultLineParallelInner(lin,col);
-										
-					ret = PAPI_stop(EventSet, values);
-			  		if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
-			  		printf("L1 DCM: %lld \n",values[0]);
-			  		printf("L2 DCM: %lld \n",values[1]);
-			  		printf("L3 LDM: %lld \n",values[2]);
-			  		printf("DP OPS: %lld \n",values[3]);
-			  		printf("TOT INS: %lld \n", values[4]);
+    op = 1;
+    do {
+        cout << endl << "1. 1st parallel solution (Outer Loop)" << endl;
+        cout << "2. 2nd parallel solution (Inner Loop)" << endl;
+        cout << "0. Exit" << endl;
+        cout << "Selection?: ";
+        cin >> op;
+        if (op == 0)
+            break;
 
-					ret = PAPI_reset( EventSet );
-					if ( ret != PAPI_OK )
-						std::cout << "FAIL reset" << endl; 
-				}
-				break;
-		}
-	} while (op != 0);
+        cout << endl << "Minimum dimension: lins=cols?: ";
+        cin >> n_min;
+        cout << endl << "Maximum dimension: lins=cols?: ";
+        cin >> n_max;
+        cout << endl << "Step?: ";
+        cin >> inc;
+        cout << endl;
 
-	ret = PAPI_remove_event( EventSet, PAPI_L1_DCM );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl; 
+        switch (op) {
+            case 1:
+                for (int n = n_min; n <= n_max; n += inc) {
+                    ret = PAPI_start(EventSet);
+                    if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
 
-	ret = PAPI_remove_event( EventSet, PAPI_L2_DCM );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl;
-	
-	ret = PAPI_remove_event( EventSet, PAPI_L3_LDM );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl;
-	
-	ret = PAPI_remove_event( EventSet, PAPI_DP_OPS );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl;
-	
-	ret = PAPI_remove_event( EventSet, PAPI_TOT_INS );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL remove event" << endl;
+                    cout << endl << "Dimensions: " << n << '*' << n << endl;
+                    lin = n;
+                    col = n;
+                    OnMultLineParallelOuter(lin, col);
 
-	ret = PAPI_destroy_eventset( &EventSet );
-	if ( ret != PAPI_OK )
-		std::cout << "FAIL destroy" << endl;
+                    ret = PAPI_stop(EventSet, values);
+                    if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
+                    printf("L1 DCM: %lld \n", values[0]);
+                    printf("L2 DCM: %lld \n", values[1]);
+                    printf("FP OPS: %lld \n", values[2]);
+                    printf("TOT INS: %lld \n", values[3]);
+
+                    ret = PAPI_reset(EventSet);
+                    if (ret != PAPI_OK)
+                        std::cout << "FAIL reset" << endl;
+                }
+                break;
+            case 2:
+                for (int n = n_min; n <= n_max; n += inc) {
+                    ret = PAPI_start(EventSet);
+                    if (ret != PAPI_OK) cout << "ERROR: Start PAPI" << endl;
+
+                    cout << endl << "Dimensions: " << n << '*' << n << endl;
+                    lin = n;
+                    col = n;
+                    OnMultLineParallelInner(lin, col);
+
+                    ret = PAPI_stop(EventSet, values);
+                    if (ret != PAPI_OK) cout << "ERROR: Stop PAPI" << endl;
+                    printf("L1 DCM: %lld \n", values[0]);
+                    printf("L2 DCM: %lld \n", values[1]);
+                    printf("FP OPS: %lld \n", values[2]);
+                    printf("TOT INS: %lld \n", values[3]);
+
+                    ret = PAPI_reset(EventSet);
+                    if (ret != PAPI_OK)
+                        std::cout << "FAIL reset" << endl;
+                }
+                break;
+        }
+    } while (op != 0);
+
+    ret = PAPI_remove_event(EventSet, PAPI_L1_DCM);
+    if (ret != PAPI_OK)
+        std::cout << "FAIL remove event" << endl;
+
+    ret = PAPI_remove_event(EventSet, PAPI_L2_DCM);
+    if (ret != PAPI_OK)
+        std::cout << "FAIL remove event" << endl;
+
+    ret = PAPI_remove_event(EventSet, PAPI_FP_OPS);
+    if (ret != PAPI_OK)
+        std::cout << "FAIL remove event" << endl;
+
+    ret = PAPI_remove_event(EventSet, PAPI_TOT_INS);
+    if (ret != PAPI_OK)
+        std::cout << "FAIL remove event" << endl;
+
+    ret = PAPI_destroy_eventset(&EventSet);
+    if (ret != PAPI_OK)
+        std::cout << "FAIL destroy" << endl;
+
+    return 0;
 }

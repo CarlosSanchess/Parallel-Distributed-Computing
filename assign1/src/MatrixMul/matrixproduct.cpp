@@ -56,6 +56,13 @@ void OnMult(int m_ar, int m_br)
 	sprintf(st, "Time: %3.3f seconds\n", (double)(Time2 - Time1) / CLOCKS_PER_SEC);
 	cout << st;
 
+    // Calculate GFLOPs
+    double flops = 2.0 * m_ar * m_ar * m_ar;
+    double gflops = flops / ((Time2 - Time1) / (double)CLOCKS_PER_SEC) / 1e9;
+
+    sprintf(st, "Performance: %.2f GFLOPS\n", gflops);
+    cout << st;
+
 	// display 10 elements of the result matrix tto verify correctness
 	cout << "Result matrix: " << endl;
 	for(i=0; i<1; i++)
@@ -108,6 +115,13 @@ void OnMultLine(int m_ar, int m_br)
 	Time2 = clock();
 	sprintf(st, "Time: %3.3f seconds\n", (double)(Time2 - Time1) / CLOCKS_PER_SEC);
 	cout << st;
+
+    // Calculate GFLOPs
+    double flops = 2.0 * m_ar * m_ar * m_ar;
+    double gflops = flops / ((Time2 - Time1) / (double)CLOCKS_PER_SEC) / 1e9;
+
+    sprintf(st, "Performance: %.2f GFLOPS\n", gflops);
+    cout << st;
 
 	// display 10 elements of the result matrix tto verify correctness
 	cout << "Result matrix: " << endl;
@@ -163,6 +177,13 @@ void OnMultBlock(int m_ar, int m_br, int bkSize)
 
     Time2 = clock();
     sprintf(st, "Time: %3.3f seconds\n", (double)(Time2 - Time1) / CLOCKS_PER_SEC);
+    cout << st;
+
+    // Calculate GFLOPs
+    double flops = 2.0 * m_ar * m_ar * m_ar;
+    double gflops = flops / ((Time2 - Time1) / (double)CLOCKS_PER_SEC) / 1e9;
+
+    sprintf(st, "Performance: %.2f GFLOPS\n", gflops);
     cout << st;
 
     cout << "Result matrix: " << endl;
