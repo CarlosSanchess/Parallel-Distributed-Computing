@@ -22,7 +22,7 @@ public class TimeClient {
 
     }
 
-    /*User Can Login/Register, store hashed password in file. */
+    /*User Can Login/Register, store hashed password in file.Move to Server Side */
     private static String registerUser() {
         Scanner scanner = new Scanner(System.in);
 
