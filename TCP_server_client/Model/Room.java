@@ -11,12 +11,18 @@ public class Room {
     private List<String> messages;
 
     private int maxNumberOfMembers;
+    
+    private boolean isAiRoom;
+    
+    private String name;
 
     // Constructor to initialize the room
-    public Room(int maxNumberOfMembers) {
+    public Room(String Name, int maxNumberOfMembers, boolean isAiRoom) {
+        this.isAiRoom = isAiRoom;
         this.maxNumberOfMembers = maxNumberOfMembers;
         this.members = new ArrayList<>();
         this.messages = new ArrayList<>();
+        this.name = Name;
     }
 
 
@@ -24,6 +30,10 @@ public class Room {
         return members;
     }
 
+    public String getName(){
+        return name;
+    }
+    
     public void setMembers(List<Client> members) {
         this.members = members;
     }
@@ -63,5 +73,9 @@ public class Room {
 
     public int getNumberOfMembers() {
         return members.size();
+    }
+
+    public boolean getIsAi(){
+        return isAiRoom;
     }
 }
