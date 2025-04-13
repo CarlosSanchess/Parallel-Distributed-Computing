@@ -1,4 +1,5 @@
 import java.net.*;
+import java.sql.Time;
 import java.util.Scanner;
 import java.io.*;
 
@@ -32,6 +33,7 @@ public class TimeClient {
         try {
             Socket socket = new Socket(hostname, port);
             System.out.println("Connected to server at " + hostname + ":" + port);
+        
             return socket;
         } catch (UnknownHostException ex) {
             System.out.println("Server not found: " + ex.getMessage());

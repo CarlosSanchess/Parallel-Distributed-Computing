@@ -2,13 +2,14 @@ package Model;
 
 import java.util.List;
 import java.util.ArrayList;
+import Model.Message;
 
 
 public class Room {
 
     private List<Client> members;
 
-    private List<String> messages;
+    private List<Message> messages;
 
     private int maxNumberOfMembers;
     
@@ -16,13 +17,16 @@ public class Room {
     
     private String name;
 
+    private int Id;
+
     // Constructor to initialize the room
-    public Room(String Name, int maxNumberOfMembers, boolean isAiRoom) {
+    public Room(int Id, String Name, int maxNumberOfMembers, boolean isAiRoom) {
         this.isAiRoom = isAiRoom;
         this.maxNumberOfMembers = maxNumberOfMembers;
         this.members = new ArrayList<>();
         this.messages = new ArrayList<>();
         this.name = Name;
+        this.Id = Id;
     }
 
 
@@ -38,13 +42,11 @@ public class Room {
         this.members = members;
     }
 
-    public List<String> getMessages() {
+    public List<Message> getMessages() {
         return messages;
     }
 
-    public void setMessages(List<String> messages) {
-        this.messages = messages;
-    }
+   
 
     public int getMaxNumberOfMembers() {
         return maxNumberOfMembers;
@@ -67,7 +69,7 @@ public class Room {
         return members.remove(member);
     }
 
-    public void addMessage(String message) {
+    public void addMessage(Message message) {
         messages.add(message);
     }
 
@@ -77,5 +79,9 @@ public class Room {
 
     public boolean getIsAi(){
         return isAiRoom;
+    }
+
+    public int getId(){
+        return this.Id;
     }
 }
