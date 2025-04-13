@@ -282,34 +282,36 @@ public class TimeServer {
         }
     
         try {
-           
             while (true) {
                 outputPrints.cleanClientTerminal(writer);
                 outputPrints.viewRoom(room, writer);
-
-                String response = reader.readLine().trim();
-    
-                if (response.equals("/quit")) {
-                    lock.lock();
-                    try {
-                       // room.removeMember(c);
-                        c.setRoom(-1); // Reset room ID
-                    } finally {
-                        lock.unlock();
+                
+                
+                String response = checkInputWithDelay(reader,1000);
+               
+                
+                if (response != null) {
+                    if (response.equals("/quit")) {
+                        lock.lock();
+                        try {
+                            c.setRoom(-1);
+                            c.setState(ClientState.NOT_IN_ROOM); 
+                        } finally {
+                            lock.unlock();
+                        }
+                        writer.println("You have left the room.");
+                        break;
+                    } else {
+                        lock.lock();
+                        try {
+                            room.addMessage(new Message(c.getName(), response));
+                            System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
+                        } finally {
+                            lock.unlock();
+                        }
                     }
-                    writer.println("You have left the room.");
-                    break;
-                }else{
-                    lock.lock();
-                    
-                    room.addMessage(new Message(c.getName(), response));
-                    System.out.println("[INFO]:"+ c.getName() + "sent message in room" + roomId );
-                    lock.unlock();
                 }
             }
-        } catch (IOException e) {
-            writer.println("An error occurred while reading input!");
-            e.printStackTrace();
         } finally {
             outputPrints.cleanClientTerminal(writer);
         }
@@ -435,5 +437,25 @@ public class TimeServer {
             e.printStackTrace();
         
         }
+    }
+
+
+    private String checkInputWithDelay(BufferedReader reader, int delay){ //Provides a way to refresh the client and not just wait for the input
+        long startTime = System.currentTimeMillis();
+        String response = null;
+        
+        while (System.currentTimeMillis() - startTime < delay) {  
+            try {
+                if (reader.ready()) {
+                    response = reader.readLine().trim();
+                    break;
+                }
+            } catch (IOException e) {
+                System.out.println("Error reading input: " + e.getMessage());
+                e.printStackTrace();
+            }
+            safeSleep(100);
+        }
+        return response;
     }
 }
