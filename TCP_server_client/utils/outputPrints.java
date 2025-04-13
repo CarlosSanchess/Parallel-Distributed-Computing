@@ -36,7 +36,7 @@ public class outputPrints {
 
     List<Message> messages = room.getMessages();  
     List<Client> members = room.getMembers();    
-
+    System.out.println(members.get(0).getName());
     writer.println("Room: " + room.getName());
     writer.println("=".repeat(totalWidth));
 
@@ -45,19 +45,21 @@ public class outputPrints {
     for (int i = 0; i < maxLines; i++) {
         String msg = i < messages.size() ? messages.get(i).toString() : "";
         msg = truncateOrPad(msg, chatWidth);
-        if( i == 0){
-
-            writer.println(msg + " |  Members List:");
-
+        String member;
+        if(i > 0){
+             member = i < members.size() ? members.get(i - 1).getName() : "";
         }else{
-            String member = i < members.size() ? members.get(i).getName() : "";
-            member = truncateOrPad(member, membersWidth);
-            writer.println(msg + " |                " + member);
-
+            member = "Members List:";
         }
-    }
 
+        member = truncateOrPad(member, membersWidth);
+        writer.println(msg + " |  " + member);
+    }
+    
     writer.println("=".repeat(totalWidth));
+    writer.println("[ Write your message below ]");
+    writer.print("> ");
+   // writer.flush();
 }
 
     private static String truncateOrPad(String str, int width) {

@@ -124,25 +124,26 @@ public class TimeServer {
         } catch (NoSuchAlgorithmException e) {
             throw new RuntimeException("Error hashing password", e);
         }
-        lock.lock();
-        try {
-            boolean usernameTaken = false; //TODO
 
             if (choice.equals("1")) { // Register
-                if (usernameTaken) {
-                    writer.println("Username already taken");
-                    return null;
-                }
-                
-                Client c = new Client(clients.size(),sockClient.getInetAddress(), username, password);
+                lock.lock();
+                    boolean usernameTaken = false; //TODO
 
-                clients.add(c); 
-                outputPrints.cleanClientTerminal(writer);
-                safeSleep(1000);
-                writer.println("Registration successful. Welcome " + username);
-                System.out.println("[INFO]: User " + username + "sucessfully registered.");
+                    if (usernameTaken) {
+                        writer.println("Username already taken");
+                        return null;
+                    }
+                    
+                    Client c = new Client(clients.size(),sockClient.getInetAddress(), username, password);
+
+                    clients.add(c); 
+                    outputPrints.cleanClientTerminal(writer);
+                    safeSleep(1000);
+                    writer.println("Registration successful. Welcome " + username);
+                    System.out.println("[INFO]: User " + username + "sucessfully registered.");
+                lock.unlock();
                 return c;
-            } 
+            }
            // else { // Login
                 // if (usernameTaken) {
                 //     writer.println("Username already in use");
@@ -163,9 +164,6 @@ public class TimeServer {
             storingAndHashingCredentials(newClient);
 
             return newClient;
-        } finally {
-            lock.unlock();
-        }
     }
 
     
@@ -209,11 +207,15 @@ public class TimeServer {
                 writer.println(roomInfo);
             }
 
-            writer.println("To join a room, type: /join <room number>");
+            writer.println("To join a room, type: /join <room number> or /create to create a room.");
             String input = readLineForFlags(reader, writer);
+            if(input.equals("/create")){
+                handleRoomCreation(reader, writer, c);  
+                continue;
+            }
 
             if (!input.startsWith("/join")) {
-                writer.println("Invalid command. Use: /join <room number>");
+                writer.println("Invalid command. Use: /join <room number> or /create to create a room");
                 continue;
             }
 
@@ -224,8 +226,6 @@ public class TimeServer {
             }
 
             int choice;
-            lock.lock();
-            try {
                 try {
                     choice = Integer.parseInt(parts[1]) - 1;
                 } catch (NumberFormatException e) {
@@ -237,26 +237,25 @@ public class TimeServer {
                     writer.println("No room with that number. Please choose a valid room.");
                     continue;
                 }
+                lock.lock();
+                    Room selectedRoom = rooms.get(choice);
 
-                Room selectedRoom = rooms.get(choice);
+                    if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers()) {
+                        writer.println("That room is full. Please choose another one:");
+                        lock.unlock();
+                        continue;
+                    }
+                    
+                    // selectedRoom.addMember(c); // TODO: actually add the client
+                    selectedRoom.addMember(c);
+                    c.setRoom(selectedRoom.getId());
 
-                if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers()) {
-                    writer.println("That room is full. Please choose another one:");
-                    lock.unlock();
-                    continue;
-                }
+                    writer.println("✅ Joined room: " + selectedRoom.getName());
+                    System.out.println("[INFO]: " + c.getName() + " joined " + selectedRoom.getName());
+                    c.setState(ClientState.IN_ROOM);
 
-                // selectedRoom.addMember(c); // TODO: actually add the client
-                selectedRoom.addMember(c);
-                c.setRoom(selectedRoom.getId());
-
-                writer.println("✅ Joined room: " + selectedRoom.getName());
-                System.out.println("[INFO]: " + c.getName() + " joined " + selectedRoom.getName());
-                c.setState(ClientState.IN_ROOM);
-                //Unlock
-            }finally{
                 lock.unlock();
-            }
+    
             break;
         }
     }
@@ -283,6 +282,7 @@ public class TimeServer {
         }
     
         try {
+           
             while (true) {
                 outputPrints.cleanClientTerminal(writer);
                 outputPrints.viewRoom(room, writer);
@@ -303,7 +303,8 @@ public class TimeServer {
                     lock.lock();
                     
                     room.addMessage(new Message(c.getName(), response));
-                    System.out.println("[INFO:]"+ c.getName() + "sent message in room" + roomId );
+                    System.out.println("[INFO]:"+ c.getName() + "sent message in room" + roomId );
+                    lock.unlock();
                 }
             }
         } catch (IOException e) {
@@ -340,6 +341,99 @@ public class TimeServer {
             writer.println("An error occurred while reading input. Please try again.");
             e.printStackTrace();
             return null;
+        }
+    }
+
+    private void handleRoomCreation(BufferedReader reader, PrintWriter writer, Client c) {
+        outputPrints.cleanClientTerminal(writer);
+        writer.println("=== Create a New Room ===");
+        writer.println("Press 'q' at any time to cancel.\n");
+    
+        try {
+            String name = null;
+            while (true) {
+                writer.println("Enter the room name: ");
+               // writer.flush();
+                name = reader.readLine().trim();
+    
+                if (name.equalsIgnoreCase("q")) {
+                    writer.println("❌ Room creation cancelled.");
+                    safeSleep(500);
+                    return;
+                }
+    
+                if (!name.isEmpty()) {
+                    break;
+                }
+    
+                writer.println("⚠️ Room name cannot be empty.");
+            }
+    
+            // 2. Is AI room? (y/n)
+            boolean isAiRoom = false;
+            while (true) {
+                writer.println("Is this an AI room? (y/n): ");
+                String aiResponse = reader.readLine().trim().toLowerCase();
+    
+                if (aiResponse.equals("q")) {
+                    writer.println("❌ Room creation cancelled.");
+                    safeSleep(500);
+                    return;
+                }
+    
+                if (aiResponse.equals("y")) {
+                    isAiRoom = true;
+                    break;
+                } else if (aiResponse.equals("n")) {
+                    isAiRoom = false;
+                    break;
+                } else {
+                    writer.println("⚠️ Please enter 'y' or 'n'.");
+                }
+            }
+    
+            // 3. Max members
+            int maxMembers;
+            while (true) {
+                writer.println("Max number of members (-1 for infinite): ");
+                String input = reader.readLine().trim();
+    
+                if (input.equalsIgnoreCase("q")) {
+                    writer.println("❌ Room creation cancelled.");
+                    return;
+                }
+    
+                try {
+                    maxMembers = Integer.parseInt(input);
+                    if (maxMembers == -1 || maxMembers > 0) {
+                        break;
+                    } else {
+                        writer.println("⚠️ Please enter -1 or a positive number.");
+                    }
+                } catch (NumberFormatException e) {
+                    writer.println("⚠️ Please enter a valid number.");
+                }
+            }
+    
+            // 4. Create room
+            lock.lock();
+            try{
+                int roomId = rooms.size();
+                Room r = new Room(roomId, name, maxMembers, isAiRoom);
+                rooms.add(r);
+                System.out.println("[INFO]: " + c.getName() + " created " + r.getName());
+
+            }finally{
+                lock.unlock();
+            }
+           
+            writer.println("\n✅ Room created successfully!");
+            safeSleep(500);
+            return;
+        } catch (IOException e) {
+            writer.println("❌ An error occurred during room creation: " + e.getMessage());
+            e.printStackTrace();
+        
         }
     }
 }
