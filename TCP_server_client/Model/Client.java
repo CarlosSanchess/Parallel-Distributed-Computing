@@ -9,7 +9,8 @@ public class Client {
     public enum ClientState {
         NOT_IN_ROOM,
         IN_ROOM,
-        WAITING
+        WAITING,
+        EXITING
     }
 
     private InetAddress inetaddr;
@@ -19,9 +20,10 @@ public class Client {
     private int clientId;
     private ClientState state;
     private int roomId;
+    private boolean isAi;
     
 
-    public Client(int clientId, InetAddress inetaddr, String userName, String hashedPassword) {
+    public Client(int clientId, InetAddress inetaddr, String userName, String hashedPassword, boolean isAi) {
         this.clientId = clientId;
         this.inetaddr = inetaddr;
         this.userName = userName;
@@ -29,6 +31,7 @@ public class Client {
         this.isAuth = false;
         this.state = ClientState.NOT_IN_ROOM; //Not In Room By default, when creating Client
         this.roomId = -1; // Not in Room
+        this.isAi = isAi;
     }
 
 
