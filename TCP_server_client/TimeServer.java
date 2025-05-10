@@ -130,8 +130,6 @@ public class TimeServer {
 
         String choice = null;
         while (true) {
-            writer.print("Your choice: ");
-            writer.flush();
             try {
                 choice = reader.readLine().trim();
                 if (choice.equalsIgnoreCase("q")) {
@@ -206,7 +204,7 @@ public class TimeServer {
                     outputPrints.cleanClientTerminal(writer);
                     storingAndHashingCredentials(c);
                     writer.println("Registration successful. Welcome " + username);
-                    System.out.println("[INFO]: User " + username + "sucessfully registered.");
+                    System.out.println("[INFO]: User " + username + " sucessfully registered.");
                     
             }else{
                 try (BufferedReader readerCredentials = new BufferedReader(new FileReader("credentials.txt"))) {

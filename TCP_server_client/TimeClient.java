@@ -47,8 +47,8 @@ public class TimeClient {
             
             new Thread(new ServerResponseHandler(socket)).start();
             
-            appendToOutput("Connected to server at " + hostname + ":" + port);
-            appendToOutput("Type your messages (type 'exit' to quit):");
+            // Removed the "Connected to server" message from GUI
+            System.out.println("Connected to server at " + hostname + ":" + port); // Console only
         } catch (UnknownHostException ex) {
             appendToOutput("Server not found: " + ex.getMessage());
         } catch (IOException ex) {
@@ -72,15 +72,14 @@ public class TimeClient {
 
     private void appendToOutput(String text) {
         SwingUtilities.invokeLater(() -> {
-            if (text.contains("\u001b[H\u001b[2J") || 
-                text.contains("\u001b[2J") || 
-                text.contains("\u001b[3J") ||
-                text.contains("\u001bc")) {
-                outputArea.setText("");
+            // Filter out ANSI escape sequences
+            String cleanedText = text.replaceAll("\u001B\\[[;\\d]*[ -/]*[@-~]", "");
+            
+            if (cleanedText.trim().isEmpty()) {
                 return;
             }
             
-            outputArea.append(text + "\n");
+            outputArea.append(cleanedText + "\n");
             outputArea.setCaretPosition(outputArea.getDocument().getLength());
         });
     }
