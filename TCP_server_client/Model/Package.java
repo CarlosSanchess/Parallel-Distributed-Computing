@@ -25,15 +25,41 @@ public class Package {
     }
 
     public String serialize() {
-        return token + "|" + message;
+        return toString();
     }
 
     public static Package deserialize(String serialized) {
-        String[] parts = serialized.split("\\|", 2);
-        if (parts.length == 2) {
-            return new Package(parts[1], parts[0]);
+        if (!serialized.startsWith("Package{")) {
+            String[] parts = serialized.split("\\|", 2);
+            if (parts.length == 2) {
+                return new Package(parts[1], parts[0]);
+            }
+            return new Package(serialized);
         }
-        return new Package(serialized); 
+    
+        try {
+            String content = serialized.substring("Package{".length(), serialized.length() - 1);
+            String[] parts = content.split(", ");
+            
+            String message = null;
+            String token = null;
+            
+            for (String part : parts) {
+                if (part.startsWith("message='")) {
+                    message = part.substring("message='".length(), part.length() - 1);
+                } else if (part.startsWith("token='")) {
+                    token = part.substring("token='".length(), part.length() - 1);
+                }
+            }
+            
+            if (token != null) {
+                return new Package(message, token);
+            }
+            return new Package(message);
+        } catch (Exception e) {
+            // Fallback if parsing fails
+            return new Package(serialized);
+        }
     }
 
     @Override
