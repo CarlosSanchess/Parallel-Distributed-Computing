@@ -9,10 +9,16 @@ public class TimeClient {
     private TextField inputField;
     private Socket socket;
     private PrintWriter writer;
+    private String sessionToken;
+    private boolean shouldReconnect = true;
+    private String hostname;
+    private int port;
 
     public TimeClient(String hostname, int port) {
+        this.hostname = hostname;
+        this.port = port;
         initializeGUI();
-        connectToServer(hostname, port);
+        connectToServer();
     }
 
     private void initializeGUI() {
@@ -37,26 +43,44 @@ public class TimeClient {
         frame.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
+                shouldReconnect = false;
                 closeConnection();
             }
         });
 
         frame.setVisible(true);
+        
+        // Add a message to let the user know the client is starting
+        appendToOutput("Connecting to server at " + hostname + ":" + port + "...");
     }
 
-    private void connectToServer(String hostname, int port) {
-        try {
-            socket = new Socket(hostname, port);
-            writer = new PrintWriter(socket.getOutputStream(), true);
-            
-            new Thread(new ServerResponseHandler(socket)).start();
-            
-            // Removed the "Connected to server" message from GUI
-            System.out.println("Connected to server at " + hostname + ":" + port); // Console only
-        } catch (UnknownHostException ex) {
-            appendToOutput("Server not found: " + ex.getMessage());
-        } catch (IOException ex) {
-            appendToOutput("I/O error: " + ex.getMessage());
+    private void connectToServer() {
+        while (shouldReconnect) {
+            try {
+                socket = new Socket(hostname, port);
+                writer = new PrintWriter(socket.getOutputStream(), true);
+                
+                // Send an empty line to trigger server response if needed
+                if (sessionToken != null) {
+                    writer.println("/reconnect " + sessionToken);
+                } else {
+                    // Send a dummy input to trigger the server's initial response
+                    writer.println("");
+                }
+                
+                new Thread(new ServerResponseHandler(socket)).start();
+                appendToOutput("Connected to server at " + hostname + ":" + port);
+                break;
+            } catch (IOException ex) {
+                appendToOutput("Connection failed: " + ex.getMessage());
+                appendToOutput("Retrying in 5 seconds...");
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return;
+                }
+            }
         }
     }
 
@@ -68,6 +92,7 @@ public class TimeClient {
             writer.println(input);
             
             if ("/exit".equalsIgnoreCase(input)) {
+                shouldReconnect = false;
                 appendToOutput("Disconnecting from server...");
                 closeConnection();
             }
@@ -81,9 +106,15 @@ public class TimeClient {
                 text.contains("\u001b[3J") ||
                 text.contains("\u001bc")) {
                 outputArea.setText("");
-            return;
-        }            
+                return;
+            }            
+            
             if (text.trim().isEmpty()) {
+                return;
+            }
+            
+            if (text.startsWith("/token ")) {
+                sessionToken = text.substring(7);
                 return;
             }
             
@@ -121,12 +152,22 @@ public class TimeClient {
                 }
                 
                 appendToOutput("Server has disconnected");
-                EventQueue.invokeLater(() -> {
-                    frame.dispose();
-                });
+                if (shouldReconnect) {
+                    appendToOutput("Attempting to reconnect...");
+                    connectToServer();
+                } else {
+                    EventQueue.invokeLater(() -> {
+                        frame.dispose();
+                    });
+                }
                 
             } catch (IOException ex) {
-                appendToOutput("Error reading server response: " + ex.getMessage());
+                if (shouldReconnect) {
+                    appendToOutput("Connection lost. Attempting to reconnect...");
+                    connectToServer();
+                } else {
+                    appendToOutput("Error reading server response: " + ex.getMessage());
+                }
             }
         }
     }

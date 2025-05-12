@@ -57,7 +57,10 @@ public class AIIntegration {
             String context = buildContext(prompt, conversationHistory);
             String requestBody = buildJsonRequest(context);
             
-            HttpURLConnection connection = (HttpURLConnection) new URL(OLLAMA_URL).openConnection();
+            // Fix for deprecated URL constructor
+            URI uri = new URI(OLLAMA_URL);
+            HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
+            
             try {
                 connection.setRequestMethod("POST");
                 connection.setRequestProperty("Content-Type", "application/json");
