@@ -188,7 +188,11 @@ public class TimeServer {
         lock.lock();
         try {
             if (choice.equals("1")) {
-                return handleRegistration(sockClient, username, password, writer);
+                Client client = handleRegistration(sockClient, username, password, writer);
+                if (client == null) {
+                    return performAuth(sockClient, reader, writer);
+                }
+                return client;
             } else {
                 return handleLogin(sockClient, username, password, writer);
             }
@@ -244,7 +248,7 @@ public class TimeServer {
     private Client handleRegistration(Socket sockClient, String username, String password, PrintWriter writer) {
         try {
             if (isUsernameTaken(username)) {
-                writer.println("Username already taken");
+                writer.println("Username already exists");  
                 return null;
             }
             
@@ -256,11 +260,11 @@ public class TimeServer {
             nextClientId++;
             storingCredentials(c);
             writer.println("/token " + c.getSessionToken());
-            writer.println("Registration successful. Welcome " + username);
+            writer.println("Registration successful for user: " + username); 
             System.out.println("[INFO] User " + username + " successfully registered.");
             return c;
         } catch (Exception e) {
-            writer.println("Error during registration.");
+            writer.println("Error during registration: " + e.getMessage());  
             return null;
         }
     }
@@ -505,7 +509,7 @@ public class TimeServer {
 
             if(input.equals("/help")){
                 outputPrints.printHelpPrompt(writer);
-                reader.readLine(); //Waiting for Key
+                reader.readLine(); 
                 outputPrints.cleanClientTerminal(writer);
                 utils.safeSleep(500);
                 return null;
