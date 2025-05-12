@@ -209,6 +209,7 @@ public class TimeServer {
 
     private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer) {
         try {
+            
             Map<String, String[]> credentials = readCredentials();
             if (!credentials.containsKey(username)) {
                 writer.println("Username not found");
@@ -218,6 +219,15 @@ public class TimeServer {
             String[] creds = credentials.get(username);
             String storedHash = creds[3];
             String inputHash = shaHash.toHexString(shaHash.getSHA(password));
+            
+            if (storedHash.equals(inputHash)) {
+                for (Client c : clients) {
+                    if (c.getName().equals(username)) {
+                        writer.println("User already logged in");
+                        return c;
+                    }
+                }
+            }
             
             if (storedHash.equals(inputHash)) {
                 Client c = new Client(
