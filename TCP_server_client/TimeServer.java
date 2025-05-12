@@ -23,6 +23,7 @@ public class TimeServer {
     private List<Room> rooms;
     private int port;
     private List<Client> clients;
+    private int nextClientId;
     private boolean isRunning = true;
     private ServerSocket serverSocket = null;
     private final ReentrantLock lock = new ReentrantLock();
@@ -34,6 +35,7 @@ public class TimeServer {
         this.rooms = new ArrayList<>();
         this.port = port;
         this.clients = new ArrayList<>();
+        this.nextClientId = utils.readLastId() + 1;
     }
 
     public static void main(String[] args) {
@@ -78,7 +80,7 @@ public class TimeServer {
             serverSocket = new ServerSocket(this.port);
             System.out.println("Server is listening on port " + this.port);
 
-            while (true) {
+            while (isRunning) {
                 Socket socket = serverSocket.accept();
                 virtualThreadExecutor.submit(() -> handleRequest(socket));
             }
@@ -96,15 +98,17 @@ public class TimeServer {
         PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
             try {
                 Client c = null;
-                while (c == null) {
-                    c = performAuth(sockClient);
-                }
-                if(c.getState() == ClientState.NOT_IN_ROOM){
-                    showMainHub(c, sockClient);
-                }
-                if(c.getState() == ClientState.IN_ROOM){
-                    showRoom(c, sockClient, c.getRoomId(), reader, writer);
-                }
+                while(true){
+                    while (c == null) {
+                        c = performAuth(sockClient);
+                    }
+                    if(c.getState() == ClientState.NOT_IN_ROOM){
+                        showMainHub(c, sockClient);
+                    }
+                    if(c.getState() == ClientState.IN_ROOM){
+                        showRoom(c, sockClient, c.getRoomId(), reader, writer);
+                    }
+            }
             } catch (IOException e) {
                 System.out.println("Client handling error: " + e.getMessage());
             } finally {
@@ -198,7 +202,8 @@ public class TimeServer {
                         return null;
                     }
                     try{
-                    c = new Client(clients.size(),sockClient.getInetAddress(), username, shaHash.toHexString(shaHash.getSHA(password)), false);
+                        c = new Client(this.nextClientId,sockClient.getInetAddress(), username, shaHash.toHexString(shaHash.getSHA(password)), false);
+                        this.nextClientId++;
                     }catch (NoSuchAlgorithmException e) {
                         throw new RuntimeException("Error hashing password", e);
                     }
@@ -219,7 +224,8 @@ public class TimeServer {
                         if (existingUsername.equals(username)) {
                             if (storedPasswordHash.equals(password)) {
 
-                                c =  new Client(Integer.parseInt(parts[0]), InetAddress.getByName(parts[1]), username, storedPasswordHash, false);
+                                c =  new Client(this.nextClientId, InetAddress.getByName(parts[1]), username, storedPasswordHash, false);
+                                this.nextClientId++;
                                 clients.add(c);
                                 System.out.println("[INFO]: User " + username + "sucessfully logged in.");
 
@@ -286,7 +292,10 @@ public class TimeServer {
             writer.println("To join a room, type: /join <room number> or /create to create a room.");
             String input = readLineForFlags(reader, writer);
             if(input.equals("/quit")){
-                safeExit();
+            }
+            if(input.equals("/logout")){
+                c = null;
+                return;
             }
             if(input.equals("/create")){
                 handleRoomCreation(reader, writer, c);  
@@ -535,4 +544,6 @@ public class TimeServer {
         }
         return response;
     }
+
+   
 }

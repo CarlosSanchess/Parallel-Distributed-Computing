@@ -2,3 +2,14 @@ Handle -1/ infinite room member size
 Member list printing
 Login
 Hashing Passwords
+
+
+Dicas do Professor:
+
+23 ate 26 
+
+- Usar files em vez de sql
+- Client com thread para receber em vez de refresh Rate, e uma thread para escrever. (Todo)
+- Store cookie on the client side, send cookie at every request to the server, store the client cookie with an expire time in the server. (On File)
+-So envia estado do chat, quando o server recebe uma nova mensagem.
+-Fix na authenticção

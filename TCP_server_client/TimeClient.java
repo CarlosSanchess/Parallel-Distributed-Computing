@@ -2,12 +2,11 @@ import java.awt.*;
 import java.awt.event.*;
 import java.net.*;
 import java.io.*;
-import javax.swing.*;
 
 public class TimeClient {
-    private JFrame frame;
-    private JTextArea outputArea;
-    private JTextField inputField;
+    private Frame frame;
+    private TextArea outputArea;
+    private TextField inputField;
     private Socket socket;
     private PrintWriter writer;
 
@@ -17,25 +16,30 @@ public class TimeClient {
     }
 
     private void initializeGUI() {
-        frame = new JFrame("Time Client");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame = new Frame("Time Client (AWT)");
         frame.setSize(500, 400);
         frame.setLayout(new BorderLayout());
 
-        outputArea = new JTextArea();
+        outputArea = new TextArea();
         outputArea.setEditable(false);
-        JScrollPane scrollPane = new JScrollPane(outputArea);
-        frame.add(scrollPane, BorderLayout.CENTER);
+        frame.add(outputArea, BorderLayout.CENTER);
 
-        JPanel inputPanel = new JPanel(new BorderLayout());
-        inputField = new JTextField();
+        Panel inputPanel = new Panel(new BorderLayout());
+        inputField = new TextField();
         inputField.addActionListener(this::handleInput);
-        JButton sendButton = new JButton("Send");
+        Button sendButton = new Button("Send");
         sendButton.addActionListener(this::handleInput);
 
         inputPanel.add(inputField, BorderLayout.CENTER);
         inputPanel.add(sendButton, BorderLayout.EAST);
         frame.add(inputPanel, BorderLayout.SOUTH);
+
+        frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                closeConnection();
+            }
+        });
 
         frame.setVisible(true);
     }
@@ -63,7 +67,7 @@ public class TimeClient {
         if (writer != null) {
             writer.println(input);
             
-            if ("exit".equalsIgnoreCase(input)) {
+            if ("/exit".equalsIgnoreCase(input)) {
                 appendToOutput("Disconnecting from server...");
                 closeConnection();
             }
@@ -71,7 +75,7 @@ public class TimeClient {
     }
 
     private void appendToOutput(String text) {
-        SwingUtilities.invokeLater(() -> {
+        EventQueue.invokeLater(() -> {
             if (text.contains("\u001b[H\u001b[2J") || 
                 text.contains("\u001b[2J") || 
                 text.contains("\u001b[3J") ||
@@ -81,7 +85,6 @@ public class TimeClient {
             }
             
             outputArea.append(text + "\n");
-            outputArea.setCaretPosition(outputArea.getDocument().getLength());
         });
     }
 
@@ -114,11 +117,7 @@ public class TimeClient {
                 }
                 
                 appendToOutput("Server has disconnected");
-                SwingUtilities.invokeLater(() -> {
-                    JOptionPane.showMessageDialog(frame, 
-                        "Server has disconnected", 
-                        "Connection closed", 
-                        JOptionPane.INFORMATION_MESSAGE);
+                EventQueue.invokeLater(() -> {
                     frame.dispose();
                 });
                 
@@ -137,6 +136,6 @@ public class TimeClient {
         String hostname = args[0];
         int port = Integer.parseInt(args[1]);
         
-        SwingUtilities.invokeLater(() -> new TimeClient(hostname, port));
+        EventQueue.invokeLater(() -> new TimeClient(hostname, port));
     }
 }
