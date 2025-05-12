@@ -22,7 +22,6 @@ public class TimeServer {
     private final ExecutorService virtualThreadExecutor = 
         Executors.newVirtualThreadPerTaskExecutor();
     private int nextClientId;
-    private final ConcurrentHashMap<String, Client> activeSessions = new ConcurrentHashMap<>();
 
     public TimeServer(int port) {
         this.rooms = new ArrayList<>();
@@ -88,22 +87,7 @@ public class TimeServer {
             PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
             
             try {
-                String firstLine = reader.readLine();
-                Client c = null;
-                
-                if (firstLine != null && firstLine.startsWith("/reconnect")) {
-                    String token = firstLine.split(" ")[1];
-                    c = authenticateWithToken(token);
-                    if (c != null) {
-                        c.setSocket(sockClient);
-                        writer.println("/token " + c.getSessionToken());
-                        writer.println("Reconnected successfully. Welcome back " + c.getName());
-                        continueSession(c, sockClient);
-                        return;
-                    }
-                }
-                
-                c = performAuth(sockClient, reader, writer);
+                Client c = performAuth(sockClient, reader, writer);
                 if (c == null) return;
                 
                 if (c.getState() == ClientState.NOT_IN_ROOM) {
@@ -123,49 +107,6 @@ public class TimeServer {
             }
         } catch (IOException e) {
             System.out.println("[ERROR] Failed to handle client request: " + e.getMessage());
-        }
-    }
-
-    private Client authenticateWithToken(String token) {
-        lock.lock();
-        try {
-            Client client = activeSessions.get(token);
-            if (client != null) {
-                return client;
-            }
-            
-            try {
-                Map<String, Client> credentials = readCredentials();
-                for (Client c : credentials.values()) {
-                    if (token.equals(c.getSessionToken())) {
-                        activeSessions.put(token, c);
-                        if (!clients.contains(c)) {
-                            clients.add(c);
-                        }
-                        return c;
-                    }
-                }
-            } catch (IOException e) {
-                System.out.println("[ERROR] Failed to read credentials: " + e.getMessage());
-            }
-            return null;
-        } finally {
-            lock.unlock();
-        }
-    }
-
-    private void continueSession(Client c, Socket sockClient) {
-        try {
-            BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
-            PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
-            
-            if (c.getState() == ClientState.NOT_IN_ROOM) {
-                showMainHub(c, sockClient, reader, writer);
-            } else {
-                showRoom(c, sockClient, c.getRoomId(), reader, writer);
-            }
-        } catch (IOException e) {
-            System.out.println("Error continuing session: " + e.getMessage());
         }
     }
 
@@ -254,12 +195,9 @@ public class TimeServer {
             
             String hashedPassword = shaHash.toHexString(shaHash.getSHA(password));
             Client c = new Client(nextClientId, sockClient.getInetAddress(), username, hashedPassword, false);
-            c.generateNewToken();
             clients.add(c);
-            activeSessions.put(c.getSessionToken(), c);
             nextClientId++;
             storingCredentials(c);
-            writer.println("/token " + c.getSessionToken());
             writer.println("Registration successful for user: " + username); 
             System.out.println("[INFO] User " + username + " successfully registered.");
             return c;
@@ -284,7 +222,6 @@ public class TimeServer {
             if (storedHash.equals(inputHash)) {
                 for (Client c : clients) {
                     if (c.getName().equals(username)) {
-                        writer.println("/token " + c.getSessionToken());
                         writer.println("User already logged in");
                         return c;
                     }
@@ -298,16 +235,7 @@ public class TimeServer {
                     false
                 );
                 
-                if (storedClient.getSessionToken() != null) {
-                    c.setSessionToken(storedClient.getSessionToken());
-                } else {
-                    c.generateNewToken();
-                    storingCredentials(c);
-                }
-                
                 clients.add(c);
-                activeSessions.put(c.getSessionToken(), c);
-                writer.println("/token " + c.getSessionToken());
                 writer.println("Login successful. Welcome back " + username);
                 System.out.println("[INFO] User " + username + " successfully logged in.");
                 return c;
@@ -345,9 +273,6 @@ public class TimeServer {
                         parts[3],
                         false
                     );
-                    if (parts.length >= 5 && !parts[4].equals("null")) {
-                        client.setSessionToken(parts[4]);
-                    }
                     credentials.put(client.getName(), client);
                 }
             }

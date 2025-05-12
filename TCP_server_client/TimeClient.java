@@ -9,7 +9,6 @@ public class TimeClient {
     private TextField inputField;
     private Socket socket;
     private PrintWriter writer;
-    private String sessionToken;
     private boolean shouldReconnect = true;
     private String hostname;
     private int port;
@@ -83,8 +82,6 @@ public class TimeClient {
             inputField.setText("");  
         });
 
-
-        
         exitButton.addActionListener(e -> {
             shouldReconnect = false;
             closeConnection();
@@ -118,7 +115,6 @@ public class TimeClient {
         frame.addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent e) {
-                shouldReconnect = false;
                 closeConnection();
                 frame.dispose();
                 System.exit(0);
@@ -192,12 +188,6 @@ public class TimeClient {
                     statusLabel.setText("Status: Connecting...");
                     socket = new Socket(hostname, port);
                     writer = new PrintWriter(socket.getOutputStream(), true);
-                    
-                    if (sessionToken != null) {
-                        writer.println("/reconnect " + sessionToken);
-                    } else {
-                        writer.println("");
-                    }
                     
                     new Thread(new ServerResponseHandler(socket)).start();
                     
@@ -334,15 +324,9 @@ public class TimeClient {
                 text.contains("\u001b[3J") ||
                 text.contains("\u001bc")) {
                 outputArea.setText("");
-                return;
-            }            
-            
+            return;
+        }            
             if (text.trim().isEmpty()) {
-                return;
-            }
-            
-            if (text.startsWith("/token ")) {
-                sessionToken = text.substring(7);
                 return;
             }
             
