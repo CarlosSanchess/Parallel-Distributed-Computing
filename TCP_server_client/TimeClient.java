@@ -2,6 +2,10 @@ import java.awt.*;
 import java.awt.event.*;
 import java.net.*;
 import java.io.*;
+import java.util.UUID;
+
+import Model.Package;
+
 
 public class TimeClient {
     private Frame frame;
@@ -9,10 +13,12 @@ public class TimeClient {
     private TextField inputField;
     private Socket socket;
     private PrintWriter writer;
+    private final String userToken;
 
     public TimeClient(String hostname, int port) {
         initializeGUI();
         connectToServer(hostname, port);
+        userToken = UUID.randomUUID().toString();
     }
 
     private void initializeGUI() {
@@ -65,7 +71,8 @@ public class TimeClient {
         inputField.setText("");
         
         if (writer != null) {
-            writer.println(input);
+            Package p = new Package(input, userToken);
+            writer.println(p.serialize());
             
             if ("/exit".equalsIgnoreCase(input)) {
                 appendToOutput("Disconnecting from server...");

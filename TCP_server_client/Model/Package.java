@@ -1,20 +1,17 @@
 package Model;
 
-import java.util.UUID;
+import java.io.BufferedReader;
+import java.io.IOException;
 
 public class Package {
     private final String message;
     private final String token;
 
-    public Package(String message) {
+    public Package(String message, String Token) {
         this.message = message;
-        this.token = UUID.randomUUID().toString(); 
+        this.token = Token; 
     }
 
-    public Package(String message, String token) {
-        this.message = message;
-        this.token = token;
-    }
 
     public String getMessage() {
         return message;
@@ -34,7 +31,7 @@ public class Package {
             if (parts.length == 2) {
                 return new Package(parts[1], parts[0]);
             }
-            return new Package(serialized);
+            return new Package(serialized, parts[0]);
         }
     
         try {
@@ -55,13 +52,25 @@ public class Package {
             if (token != null) {
                 return new Package(message, token);
             }
-            return new Package(message);
+            return new Package(message, token);
         } catch (Exception e) {
             // Fallback if parsing fails
-            return new Package(serialized);
+            return new Package(serialized, null);
         }
     }
 
+    public static Package readInput(BufferedReader br) {
+        try {
+            String line = br.readLine();
+            if (line == null) {
+            return null;
+            }
+            return deserialize(line.trim());
+        } catch (IOException e) {
+            System.err.println("Error reading input: " + e.getMessage());
+            return null;
+        }
+    }
     @Override
     public String toString() {
         return "Package{" +

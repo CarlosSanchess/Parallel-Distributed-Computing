@@ -144,7 +144,8 @@ public class TimeServer {
 
     private String getValidChoice(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
-            String choice = reader.readLine().trim();
+            String choice = readInput(reader).getMessage();
+            System.out.println(choice);
             if (choice.equalsIgnoreCase("q")) {
                 writer.println("Exiting...");
                 utils.safeSleep(500);
@@ -161,7 +162,7 @@ public class TimeServer {
     private String getUsername(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
             writer.println("Enter your username (or 'q' to quit):");
-            String username = reader.readLine().trim();
+            String username = Model.Package.readInput(reader).getMessage();
             if (username.equalsIgnoreCase("q")) {
                 return null;
             }
@@ -175,7 +176,7 @@ public class TimeServer {
     private String getPassword(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
             writer.println("Enter your password (or 'q' to quit):");
-            String password = reader.readLine().trim();
+            String password = Model.Package.readInput(reader).getMessage();
             if (password.equalsIgnoreCase("q")) {
                 return null;
             }
@@ -188,16 +189,17 @@ public class TimeServer {
 
     private Client handleRegistration(Socket sockClient, String username, String password, PrintWriter writer) {
         try {
-            // if (isUsernameTaken(username)) {
-            //     writer.println("Username already taken");
-            //     return null;
-            // }
+            if (isUsernameTaken(username)) {
+                writer.println("Username already taken");
+                return null;
+            }
             
             String hashedPassword = shaHash.toHexString(shaHash.getSHA(password));
             Client c = new Client(nextClientId, sockClient.getInetAddress(), username, hashedPassword, false);
             clients.add(c);
             nextClientId++;
-            storingCredentials(c);
+
+            storingCredentials(c, null);
             writer.println("Registration successful. Welcome " + username);
             System.out.println("[INFO] User " + username + " successfully registered.");
             return c;
@@ -265,7 +267,7 @@ public class TimeServer {
         
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
-            while ((line = reader.readLine()) != null) {
+            while ((line = readInput(reader).getMessage()) != null) {
                 String[] parts = line.split(",");
                 if (parts.length >= 4) {
                     credentials.put(parts[2], parts);
@@ -275,7 +277,7 @@ public class TimeServer {
         return credentials;
     }
 
-    private void storingCredentials(Client c) throws IOException {
+    private void storingCredentials(Client c, String token) throws IOException {
         String data = String.join(",",
             String.valueOf(c.getId()),
             c.getInetaddr().getHostAddress(),
@@ -283,8 +285,16 @@ public class TimeServer {
             c.getPassword()
         );
         
+        String cookie = String.join(",", 
+        String.valueOf(c.getId()),
+        String.valueOf(System.currentTimeMillis() + 3600)
+        );
+
         try (FileWriter writer = new FileWriter("credentials.txt", true)) {
             writer.write(data + "\n");
+        }
+        try (FileWriter writer = new FileWriter("tokens.txt", true)) {
+            writer.write(cookie + "\n");
         }
     }
     
@@ -433,23 +443,17 @@ public class TimeServer {
 
 
     private String readLineForFlags(BufferedReader reader, PrintWriter writer){
-        try {
-            String input = reader.readLine().trim();
+            String input = readInput(reader).getMessage();
 
             if(input.equals("/help")){
                 outputPrints.printHelpPrompt(writer);
-                 reader.readLine(); //Waiting for Key
+                readInput(reader).getMessage(); //Waiting for Key
                  outputPrints.cleanClientTerminal(writer);
                  utils.safeSleep(500);
                 return null;
             } else {
                 return input;
             }
-        } catch (IOException e) {
-            writer.println("An error occurred while reading input. Please try again.");
-            e.printStackTrace();
-            return null;
-        }
     }
 
     private void handleRoomCreation(BufferedReader reader, PrintWriter writer, Client c) {
@@ -457,12 +461,11 @@ public class TimeServer {
         writer.println("=== Create a New Room ===");
         writer.println("Press 'q' at any time to cancel.\n");
     
-        try {
             String name = null;
             while (true) {
                 writer.println("Enter the room name: ");
                // writer.flush();
-                name = reader.readLine().trim();
+                name = readInput(reader).getMessage();
     
                 if (name.equalsIgnoreCase("q")) {
                     writer.println("❌ Room creation cancelled.");
@@ -481,7 +484,7 @@ public class TimeServer {
             boolean isAiRoom = false;
             while (true) {
                 writer.println("Is this an AI room? (y/n): ");
-                String aiResponse = reader.readLine().trim().toLowerCase();
+                String aiResponse = readInput(reader).getMessage().toLowerCase();
     
                 if (aiResponse.equals("q")) {
                     writer.println("❌ Room creation cancelled.");
@@ -504,7 +507,7 @@ public class TimeServer {
             int maxMembers;
             while (true) {
                 writer.println("Max number of members (-1 for infinite): ");
-                String input = reader.readLine().trim();
+                String input = readInput(reader).getMessage();
     
                 if (input.equalsIgnoreCase("q")) {
                     writer.println("❌ Room creation cancelled.");
@@ -538,11 +541,7 @@ public class TimeServer {
             writer.println("\n✅ Room created successfully!");
             utils.safeSleep(500);
             return;
-        } catch (IOException e) {
-            writer.println("❌ An error occurred during room creation: " + e.getMessage());
-            e.printStackTrace();
-        
-        }
+      
     }
 
 
@@ -553,7 +552,7 @@ public class TimeServer {
         while (System.currentTimeMillis() - startTime < delay) {  
             try {
                 if (reader.ready()) {
-                    response = reader.readLine().trim();
+                    response = readInput(reader).getMessage();
                     break;
                 }
             } catch (IOException e) {
@@ -563,6 +562,12 @@ public class TimeServer {
             utils.safeSleep(100);
         }
         return response;
+    }
+
+    private Model.Package readInput(BufferedReader reader){
+        Model.Package p = Model.Package.readInput(reader);
+        System.out.println(p.getMessage());
+        return p;
     }
 
    
