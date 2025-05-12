@@ -65,7 +65,7 @@ public class Room {
         }
     }
 
-    public boolean removeMember(String member) {
+    public boolean removeMember(Client member) {
         return members.remove(member);
     }
 

@@ -2,7 +2,6 @@ import java.awt.*;
 import java.awt.event.*;
 import java.net.*;
 import java.io.*;
-import java.util.UUID;
 
 import Model.Package;
 
@@ -13,12 +12,12 @@ public class TimeClient {
     private TextField inputField;
     private Socket socket;
     private PrintWriter writer;
-    private final String userToken;
+    private String userToken;
 
     public TimeClient(String hostname, int port) {
         initializeGUI();
         connectToServer(hostname, port);
-        userToken = UUID.randomUUID().toString();
+        userToken = "";
     }
 
     private void initializeGUI() {
@@ -82,6 +81,7 @@ public class TimeClient {
     }
 
     private void appendToOutput(String text) {
+
         EventQueue.invokeLater(() -> {
             if (text.contains("\u001b[H\u001b[2J") || 
                 text.contains("\u001b[2J") || 
@@ -93,7 +93,7 @@ public class TimeClient {
             if (text.trim().isEmpty()) {
                 return;
             }
-            
+           
             outputArea.append(text + "\n");
             outputArea.setCaretPosition(outputArea.getText().length());  
         });
@@ -122,9 +122,12 @@ public class TimeClient {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(socket.getInputStream()))) {
                 
-                String serverResponse;
-                while ((serverResponse = reader.readLine()) != null) {
-                    appendToOutput(serverResponse);
+                Package serverResponse;
+                while ((serverResponse = Model.Package.readInput(reader)) != null) {
+                    appendToOutput(serverResponse.getMessage());
+                    if(serverResponse.getToken() != null && serverResponse.getToken().length() > 1){
+                        userToken = serverResponse.getToken();
+                    }
                 }
                 
                 appendToOutput("Server has disconnected");

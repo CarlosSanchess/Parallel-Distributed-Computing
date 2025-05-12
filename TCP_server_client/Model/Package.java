@@ -2,6 +2,7 @@ package Model;
 
 import java.io.BufferedReader;
 import java.io.IOException;
+import java.security.PKCS12Attribute;
 
 public class Package {
     private final String message;
@@ -27,13 +28,8 @@ public class Package {
 
     public static Package deserialize(String serialized) {
         if (!serialized.startsWith("Package{")) {
-            String[] parts = serialized.split("\\|", 2);
-            if (parts.length == 2) {
-                return new Package(parts[1], parts[0]);
-            }
-            return new Package(serialized, parts[0]);
+           return new Package(serialized, null);
         }
-    
         try {
             String content = serialized.substring("Package{".length(), serialized.length() - 1);
             String[] parts = content.split(", ");

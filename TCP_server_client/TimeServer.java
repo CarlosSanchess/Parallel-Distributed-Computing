@@ -7,6 +7,7 @@ import java.util.concurrent.locks.*;
 
 
 import Model.*;
+import Model.Package;
 import Model.Client.ClientState;
 import utils.shaHash;
 import utils.outputPrints;
@@ -127,15 +128,15 @@ public class TimeServer {
         String username = getUsername(reader, writer);
         if (username == null) return null;
 
-        String password = getPassword(reader, writer);
-        if (password == null) return null;
+        Model.Package passwordPackage = getPassword(reader, writer);
+        if (passwordPackage == null) return null;
 
         lock.lock();
         try {
             if (choice.equals("1")) {
-                return handleRegistration(sockClient, username, password, writer);
+                return handleRegistration(sockClient, username, passwordPackage.getMessage(), writer);
             } else {
-                return handleLogin(sockClient, username, password, writer);
+                return handleLogin(sockClient, username, passwordPackage.getMessage(), writer, passwordPackage.getToken());
             }
         } finally {
             lock.unlock();
@@ -162,7 +163,8 @@ public class TimeServer {
     private String getUsername(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
             writer.println("Enter your username (or 'q' to quit):");
-            String username = Model.Package.readInput(reader).getMessage();
+            String username = readInput(reader).getMessage();
+            System.out.println("User Name" + username);
             if (username.equalsIgnoreCase("q")) {
                 return null;
             }
@@ -173,14 +175,15 @@ public class TimeServer {
         }
     }
 
-    private String getPassword(BufferedReader reader, PrintWriter writer) throws IOException {
+    private Model.Package getPassword(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
             writer.println("Enter your password (or 'q' to quit):");
-            String password = Model.Package.readInput(reader).getMessage();
-            if (password.equalsIgnoreCase("q")) {
+            Model.Package password = readInput(reader);
+            System.out.println("PasssWord" + password);
+            if (password.getMessage().equalsIgnoreCase("q")) {
                 return null;
             }
-            if (!password.isEmpty()) {
+            if (!password.getMessage().isEmpty()) {
                 return password;
             }
             writer.println("Password cannot be empty.");
@@ -188,19 +191,25 @@ public class TimeServer {
     }
 
     private Client handleRegistration(Socket sockClient, String username, String password, PrintWriter writer) {
-        try {
-            if (isUsernameTaken(username)) {
-                writer.println("Username already taken");
-                return null;
-            }
+        try { 
+
+            //FIXXX 
+
+            // if (isUsernameTaken(username)) {
+            //     writer.println("Username already taken");
+            //     return null;
+            // }
             
             String hashedPassword = shaHash.toHexString(shaHash.getSHA(password));
             Client c = new Client(nextClientId, sockClient.getInetAddress(), username, hashedPassword, false);
             clients.add(c);
             nextClientId++;
+            String token = UUID.randomUUID().toString();
 
-            storingCredentials(c, null);
-            writer.println("Registration successful. Welcome " + username);
+            storingCredentials(c, token);
+            Model.Package p = new Package("Registration successful. Welcome " + username, token);
+
+            writer.println(p.serialize());
             System.out.println("[INFO] User " + username + " successfully registered.");
             return c;
         } catch (Exception e) {
@@ -209,9 +218,12 @@ public class TimeServer {
         }
     }
 
-    private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer) {
+    private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer, String Token) {
         try {
-            
+            if(Token != null){
+                
+            }
+
             Map<String, String[]> credentials = readCredentials();
             if (!credentials.containsKey(username)) {
                 writer.println("Username not found");
@@ -287,6 +299,7 @@ public class TimeServer {
         
         String cookie = String.join(",", 
         String.valueOf(c.getId()),
+        token,
         String.valueOf(System.currentTimeMillis() + 3600)
         );
 
@@ -322,6 +335,7 @@ public class TimeServer {
             writer.println("To join a room, type: /join <room number> or /create to create a room.");
             String input = readLineForFlags(reader, writer);
             if(input.equals("/quit")){
+
             }
             if(input.equals("/logout")){
                 c = null;
@@ -414,6 +428,7 @@ public class TimeServer {
                         try {
                             c.setRoom(-1);
                             c.setState(ClientState.NOT_IN_ROOM); 
+                            room.removeMember(c);
                         } finally {
                             lock.unlock();
                         }
@@ -566,7 +581,6 @@ public class TimeServer {
 
     private Model.Package readInput(BufferedReader reader){
         Model.Package p = Model.Package.readInput(reader);
-        System.out.println(p.getMessage());
         return p;
     }
 
