@@ -2,6 +2,7 @@ import java.io.*;
 import java.net.*;
 import java.security.NoSuchAlgorithmException;
 import java.util.*;
+import utils.AIIntegration;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
 
@@ -381,27 +382,26 @@ public class TimeServer {
         } finally {
             lock.unlock();
         }
-    
+
         if (room == null) {
             writer.println("Error: Room not found.");
             System.out.println("[ERROR]: Room not found.");
             c.setState(ClientState.NOT_IN_ROOM);
             return;
         }
-    
+
         try {
             while (true) {
                 outputPrints.cleanClientTerminal(writer);
                 outputPrints.viewRoom(room, writer);
                 
-                
-                String response = checkInputWithDelay(reader,1000);
-               
+                String response = checkInputWithDelay(reader, 1000);
                 
                 if (response != null) {
                     if (response.equals("/quit")) {
                         lock.lock();
                         try {
+                            room.removeMember(c.getName());
                             c.setRoom(-1);
                             c.setState(ClientState.NOT_IN_ROOM); 
                         } finally {
@@ -412,12 +412,15 @@ public class TimeServer {
                     } else {
                         lock.lock();
                         try {
+                            // Add user message
                             room.addMessage(new Message(c.getName(), response));
-                            //if(room.getIsAi()){
-                                // room.addMessage(new Message("Ai Bot", AIIntegration.performQuery(response, room.getMessages())));
-                                // TODO
-                            //}
- 
+                            
+                            // If this is an AI room, get AI response
+                            if (room.getIsAi()) {
+                                String aiResponse = AIIntegration.performQuery(response, room.getMessages());
+                                room.addMessage(new Message("AI Bot", aiResponse));
+                            }
+                            
                             System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
                         } finally {
                             lock.unlock();
