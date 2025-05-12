@@ -1,18 +1,11 @@
 import java.io.*;
 import java.net.*;
 import java.security.NoSuchAlgorithmException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.locks.*;
 
-import javax.print.DocFlavor.READER;
 
-import java.util.concurrent.locks.Condition;
 import Model.*;
 import Model.Client.ClientState;
 import utils.shaHash;
@@ -23,19 +16,23 @@ public class TimeServer {
     private List<Room> rooms;
     private int port;
     private List<Client> clients;
-    private int nextClientId;
     private boolean isRunning = true;
     private ServerSocket serverSocket = null;
     private final ReentrantLock lock = new ReentrantLock();
     private final Condition available = lock.newCondition();
     private final ExecutorService virtualThreadExecutor = 
         Executors.newVirtualThreadPerTaskExecutor();
+    private int nextClientId;
 
     public TimeServer(int port) {
         this.rooms = new ArrayList<>();
         this.port = port;
         this.clients = new ArrayList<>();
-        this.nextClientId = utils.readLastId() + 1;
+        initializeNextClientId();
+    }
+
+    private void initializeNextClientId() {
+            nextClientId = utils.readLastId() + 1;
     }
 
     public static void main(String[] args) {
@@ -43,40 +40,34 @@ public class TimeServer {
             System.out.println("Usage: java TimeServer <port>");
             return;
         }
-
         int port = Integer.parseInt(args[0]);
-        TimeServer server = new TimeServer(port);
-        server.start();
+        new TimeServer(port).start();
     }
-     private void safeExit() {
-            this.isRunning = false;
-            
-            try {
-                // Close server socket to stop accepting new connections
-                if (serverSocket != null && !serverSocket.isClosed()) {
-                    serverSocket.close();
-                }
-            } catch (IOException e) {
-                System.err.println("Error closing server socket: " + e.getMessage());
-            }
 
-            virtualThreadExecutor.shutdown();
-            
-            try {
-                if (!virtualThreadExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-                    // Force shutdown if tasks didn't complete in time
-                    virtualThreadExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                virtualThreadExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
+    private void safeExit() {
+        this.isRunning = false;
+        try {
+            if (serverSocket != null && !serverSocket.isClosed()) {
+                serverSocket.close();
             }
-
-            System.out.println("Server has shut down gracefully");
+        } catch (IOException e) {
+            System.err.println("Error closing server socket: " + e.getMessage());
         }
 
+        virtualThreadExecutor.shutdown();
+        try {
+            if (!virtualThreadExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                virtualThreadExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            virtualThreadExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+        System.out.println("Server has shut down gracefully");
+    }
+
     public void start() {
-        try{
+        try {
             serverSocket = new ServerSocket(this.port);
             System.out.println("Server is listening on port " + this.port);
 
@@ -92,14 +83,15 @@ public class TimeServer {
         }
     }
 
-    private void handleRequest(Socket sockClient)  {
-        try{
-        BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
-        PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
+    private void handleRequest(Socket sockClient) {
+        try {
+            BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
+            PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
+            
             try {
                 Client c = null;
                 while(true){
-                    while (c == null) {
+                    if(c == null) {
                         c = performAuth(sockClient);
                     }
                     if(c.getState() == ClientState.NOT_IN_ROOM){
@@ -112,15 +104,11 @@ public class TimeServer {
             } catch (IOException e) {
                 System.out.println("Client handling error: " + e.getMessage());
             } finally {
-                try {
-                    sockClient.close();
-                } catch (IOException e) {
-                    System.out.println("Error closing client socket: " + e.getMessage());
-                }
+                sockClient.close();
             }
-
-        }catch(IOException e){System.out.println("[ERROR]:Failed to create I/O streams for the client.");}
-       
+        } catch (IOException e) {
+            System.out.println("[ERROR] Failed to handle client request: " + e.getMessage());
+        }
     }
 
     private Client performAuth(Socket sockClient) throws IOException {
@@ -131,143 +119,165 @@ public class TimeServer {
         writer.println("Choose an option:");
         writer.println("1. Register");
         writer.println("2. Login");
+        writer.println("q. Quit");
 
-        String choice = null;
-        while (true) {
-            writer.print("Your choice: ");
-            writer.flush();
-            try {
-                choice = reader.readLine().trim();
-                if (choice.equalsIgnoreCase("q")) {
-                    writer.println("Exiting...");
-                    utils.safeSleep(500);
-                    safeExit();  
-                }
+        String choice = getValidChoice(reader, writer);
+        if (choice == null) return null;
 
-                if (choice.equals("1") || choice.equals("2")) {
-                    break;
-                } else {
-                    writer.println("Invalid choice. Please enter 1 for Register or 2 for Login.");
-                }
-            } catch (IOException e) {
-                writer.println("Error reading input. Try again.");
-            }
-        }
+        String username = getUsername(reader, writer);
+        if (username == null) return null;
 
+        String password = getPassword(reader, writer);
+        if (password == null) return null;
 
-        String username = null;
-        while (true) {
-            writer.println("Enter your username (or press 'q' to quit):");
-            writer.flush();
-            try {
-                username = reader.readLine().trim(); //TODO
-                if (username.equalsIgnoreCase("q")) {
-                    writer.println("Exiting...");
-                    return null;  // Exit if 'q' is pressed
-                }else{
-                    break;
-                }
-                
-            } catch (IOException e) {
-                writer.println("Error reading username. Try again.");
-            }
-        }
-
-
-        String password = null;
-        while (true) {
-            writer.println("Enter your password (or press 'q' to quit):");
-            writer.flush();
-            try {
-                password = reader.readLine().trim();
-                if (password.equalsIgnoreCase("q")) {
-                    writer.println("Exiting...");
-                    return null;  // Exit if 'q' is pressed
-                }else{
-                    break;
-                }
-            } catch (IOException e) {
-                writer.println("Error reading password. Try again.");
-        }
-    }
-
-        Client c = null;
         lock.lock();
-
-            if (choice.equals("1")) { // Register
-                    boolean usernameTaken = false; //TODO
-
-                    if (usernameTaken) {
-                        writer.println("Username already taken");
-                        return null;
-                    }
-                    try{
-                        c = new Client(this.nextClientId,sockClient.getInetAddress(), username, shaHash.toHexString(shaHash.getSHA(password)), false);
-                        this.nextClientId++;
-                    }catch (NoSuchAlgorithmException e) {
-                        throw new RuntimeException("Error hashing password", e);
-                    }
-                    clients.add(c); 
-                    outputPrints.cleanClientTerminal(writer);
-                    storingAndHashingCredentials(c);
-                    writer.println("Registration successful. Welcome " + username);
-                    System.out.println("[INFO]: User " + username + "sucessfully registered.");
-                    
-            }else{
-                try (BufferedReader readerCredentials = new BufferedReader(new FileReader("credentials.txt"))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        String[] parts = line.split(",");
-                        String existingUsername = parts[2];
-                        String storedPasswordHash = parts[3].replace(";", "");
-        
-                        if (existingUsername.equals(username)) {
-                            if (storedPasswordHash.equals(password)) {
-
-                                c =  new Client(this.nextClientId, InetAddress.getByName(parts[1]), username, storedPasswordHash, false);
-                                this.nextClientId++;
-                                clients.add(c);
-                                System.out.println("[INFO]: User " + username + "sucessfully logged in.");
-
-                            }else{
-                                lock.unlock();
-                                writer.println("Invalid Credentials.");
-                                continue;
-                            }
-                        }
-                    }
-                } catch (IOException e) {
-                    writer.println("Error reading credentials file: " + e.getMessage());
-                }
-
+        try {
+            if (choice.equals("1")) {
+                return handleRegistration(sockClient, username, password, writer);
+            } else {
+                return handleLogin(sockClient, username, password, writer);
             }
-          
-        lock.unlock();
-            
-        return c;
-
-    }
-
-    
-
-
-    private int storingAndHashingCredentials(Client c){
-
-        try{
-        String data = c.getId() + "," + c.getName() + "," + c.getPassword() + ";" + "\n";
-        System.out.println(data);
-        FileWriter writer = new FileWriter("credentials.txt", true); // Append mode
-        writer.write(data);
-        writer.close();
-
-        return 0; 
-        } catch (IOException  e) {
-            e.printStackTrace();
-            return -1; 
+        } finally {
+            lock.unlock();
         }
-            
     }
 
+    private String getValidChoice(BufferedReader reader, PrintWriter writer) throws IOException {
+        while (true) {
+            String choice = reader.readLine().trim();
+            if (choice.equalsIgnoreCase("q")) {
+                writer.println("Exiting...");
+                utils.safeSleep(500);
+                safeExit();
+                return null;
+            }
+            if (choice.equals("1") || choice.equals("2")) {
+                return choice;
+            }
+            writer.println("Invalid choice. Please enter 1 for Register or 2 for Login.");
+        }
+    }
+
+    private String getUsername(BufferedReader reader, PrintWriter writer) throws IOException {
+        while (true) {
+            writer.println("Enter your username (or 'q' to quit):");
+            String username = reader.readLine().trim();
+            if (username.equalsIgnoreCase("q")) {
+                return null;
+            }
+            if (!username.isEmpty()) {
+                return username;
+            }
+            writer.println("Username cannot be empty.");
+        }
+    }
+
+    private String getPassword(BufferedReader reader, PrintWriter writer) throws IOException {
+        while (true) {
+            writer.println("Enter your password (or 'q' to quit):");
+            String password = reader.readLine().trim();
+            if (password.equalsIgnoreCase("q")) {
+                return null;
+            }
+            if (!password.isEmpty()) {
+                return password;
+            }
+            writer.println("Password cannot be empty.");
+        }
+    }
+
+    private Client handleRegistration(Socket sockClient, String username, String password, PrintWriter writer) {
+        try {
+            // if (isUsernameTaken(username)) {
+            //     writer.println("Username already taken");
+            //     return null;
+            // }
+            
+            String hashedPassword = shaHash.toHexString(shaHash.getSHA(password));
+            Client c = new Client(nextClientId, sockClient.getInetAddress(), username, hashedPassword, false);
+            clients.add(c);
+            nextClientId++;
+            storingCredentials(c);
+            writer.println("Registration successful. Welcome " + username);
+            System.out.println("[INFO] User " + username + " successfully registered.");
+            return c;
+        } catch (Exception e) {
+            writer.println("Error during registration.");
+            return null;
+        }
+    }
+
+    private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer) {
+        try {
+            Map<String, String[]> credentials = readCredentials();
+            if (!credentials.containsKey(username)) {
+                writer.println("Username not found");
+                return null;
+            }
+            
+            String[] creds = credentials.get(username);
+            String storedHash = creds[3];
+            String inputHash = shaHash.toHexString(shaHash.getSHA(password));
+            
+            if (storedHash.equals(inputHash)) {
+                Client c = new Client(
+                    Integer.parseInt(creds[0]),
+                    InetAddress.getByName(creds[1]),
+                    username,
+                    storedHash,
+                    false
+                );
+                clients.add(c);
+                writer.println("Login successful. Welcome back " + username);
+                System.out.println("[INFO] User " + username + " successfully logged in.");
+                return c;
+            } else {
+                writer.println("Invalid password");
+                return null;
+            }
+        } catch (Exception e) {
+            writer.println("Error during login.");
+            return null;
+        }
+    }
+
+    private boolean isUsernameTaken(String username) throws IOException {
+        return readCredentials().containsKey(username);
+    }
+
+    private Map<String, String[]> readCredentials() throws IOException {
+        Map<String, String[]> credentials = new HashMap<>();
+        File file = new File("credentials.txt");
+        
+        if (!file.exists()) {
+            return credentials;
+        }
+        
+        try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(",");
+                if (parts.length >= 4) {
+                    credentials.put(parts[2], parts);
+                }
+            }
+        }
+        return credentials;
+    }
+
+    private void storingCredentials(Client c) throws IOException {
+        String data = String.join(",",
+            String.valueOf(c.getId()),
+            c.getInetaddr().getHostAddress(),
+            c.getName(),
+            c.getPassword()
+        );
+        
+        try (FileWriter writer = new FileWriter("credentials.txt", true)) {
+            writer.write(data + "\n");
+        }
+    }
+    
     private void showMainHub(Client c, Socket sockClient) throws IOException {
         Room testRoom = new Room(0,"TestRoom", 5, false); // name: TestRoom, max 5 members, not AI
         rooms.add(testRoom);
