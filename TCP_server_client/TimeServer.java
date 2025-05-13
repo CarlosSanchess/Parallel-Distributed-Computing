@@ -125,13 +125,13 @@ public class TimeServer {
         Model.Package choice = getValidChoice(reader, writer);
         if (choice == null) return null;
 
-        // if(choice.getMessage().equals("2")){
-        //     Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
-        //     System.out.println("asdsad");
-        //     if(c != null){
-        //         return c;
-        //     }
-        // }
+        if(choice.getMessage().equals("2")){
+             Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
+             System.out.println("asdsad");
+             if(c != null){
+                 return c;
+             }
+     }
 
         String username = getUsername(reader, writer);
         if (username == null) return null;
