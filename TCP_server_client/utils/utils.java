@@ -66,11 +66,12 @@ public class utils {
                     }
                     
                     String[] parts = line.split(",");
-                    if (parts.length >= 3) {
-                        String token = parts[1].trim();
+                    if (parts.length >= 4) {  
+                        String token = parts[2].trim();  
                         String[] tokenData = {
                             parts[0].trim(),  // userId
-                            parts[2].trim()  // timestamp
+                            parts[1].trim(),  // name
+                            parts[3].trim()   // timestamp
                         };
                         tokenMap.put(token, tokenData);
                     } else {
@@ -87,7 +88,9 @@ public class utils {
         } catch (Exception e) {
             System.err.println("[ERROR] Unexpected error reading tokens");
             e.printStackTrace();
-        }    
+        }
+        
+        System.out.println("[DEBUG] Loaded " + tokenMap.size() + " valid tokens");
         return tokenMap;
     }
 }

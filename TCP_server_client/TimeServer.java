@@ -275,11 +275,14 @@ public class TimeServer {
             if (tokenRecords.containsKey(Token)) {
                 String[] tokenData = tokenRecords.get(Token);
                 String userId = tokenData[0];  
-                String timestamp = tokenData[1];  
+                String name = tokenData[1];
+                String timestamp = tokenData[2];  
                 
                 // Check if token is expired (example: 24 hour validity)
                 long currentTime = System.currentTimeMillis();
-                if (false) { // todo
+                if (currentTime > Long.parseLong(timestamp)) { // todo
+                    System.out.println("Current Time :"+ currentTime);
+                    System.out.println("Time stamp: " + timestamp);
                     writer.println("Token has expired");
                     System.out.println("[INFO]TOKEN EXPRIED");
                     return null;
@@ -297,12 +300,12 @@ public class TimeServer {
                 Client c = new Client(
                     Integer.parseInt(userId),
                     sockClient.getInetAddress(),
-                    userId, // TODO START STORING username in tokens.txt
-                    "", // No password hash needed for token login
+                    name, 
+                    "", 
                     false
                 );
                 clients.add(c);
-                writer.println("Login successful with token. Welcome back " + userId);
+                writer.println("Login successful with token. Welcome back " + name);
                 System.out.println("[INFO] User ID " + userId + " successfully logged in with token.");
                 
                 return c;
@@ -347,8 +350,9 @@ public class TimeServer {
         
         String cookie = String.join(",", 
         String.valueOf(c.getId()),
+        c.getName(),
         token,
-        String.valueOf(System.currentTimeMillis() + 3600)
+        String.valueOf(System.currentTimeMillis() + 10000)
         );
 
         try (FileWriter writer = new FileWriter("credentials.txt", true)) {
