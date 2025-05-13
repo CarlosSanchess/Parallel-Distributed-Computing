@@ -315,7 +315,7 @@ public class TimeClient {
             }
         }
         
-        if (writer != null) {
+        if (writer != null && input != null) {
             Package p = new Package(input, userToken);
             writer.println(p.serialize());
         } else {
