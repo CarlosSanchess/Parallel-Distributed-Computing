@@ -10,7 +10,8 @@ public class Client {
         NOT_IN_ROOM,
         IN_ROOM,
         WAITING,
-        EXITING
+        EXITING,
+        LOGGED_OUT
     }
 
     private InetAddress inetaddr;

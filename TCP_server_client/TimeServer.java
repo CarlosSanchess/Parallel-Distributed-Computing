@@ -92,7 +92,7 @@ public class TimeServer {
             try {
                 Client c = null;
                 while(true){
-                    if(c == null) {
+                    if(c == null || c.getState() == ClientState.LOGGED_OUT) { 
                         c = performAuth(sockClient);
                     }
                     if(c.getState() == ClientState.NOT_IN_ROOM){
@@ -122,38 +122,45 @@ public class TimeServer {
         writer.println("2. Login");
         writer.println("q. Quit");
 
-        String choice = getValidChoice(reader, writer);
+        Model.Package choice = getValidChoice(reader, writer);
         if (choice == null) return null;
+
+        if(choice.getMessage().equals("2")){
+            Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
+            if(c != null){
+                return c;
+            }
+        }
 
         String username = getUsername(reader, writer);
         if (username == null) return null;
 
-        Model.Package passwordPackage = getPassword(reader, writer);
-        if (passwordPackage == null) return null;
+        String password = getPassword(reader, writer);
+        if (password == null) return null;
 
         lock.lock();
         try {
-            if (choice.equals("1")) {
-                return handleRegistration(sockClient, username, passwordPackage.getMessage(), writer);
+            if (choice.getMessage().equals("1")) {
+                return handleRegistration(sockClient, username, password, writer);
             } else {
-                return handleLogin(sockClient, username, passwordPackage.getMessage(), writer, passwordPackage.getToken());
+                return handleLogin(sockClient, username, password, writer);
             }
         } finally {
             lock.unlock();
         }
     }
 
-    private String getValidChoice(BufferedReader reader, PrintWriter writer) throws IOException {
+    private Model.Package getValidChoice(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
-            String choice = readInput(reader).getMessage();
-            System.out.println(choice);
-            if (choice.equalsIgnoreCase("q")) {
+            Model.Package choice = readInput(reader);
+            System.out.println("PasssWord" + choice.getMessage());
+            if (choice.getMessage().equalsIgnoreCase("q")) {
                 writer.println("Exiting...");
                 utils.safeSleep(500);
                 safeExit();
                 return null;
             }
-            if (choice.equals("1") || choice.equals("2")) {
+            if (choice.getMessage().equals("1") || choice.getMessage().equals("2")) {
                 return choice;
             }
             writer.println("Invalid choice. Please enter 1 for Register or 2 for Login.");
@@ -175,15 +182,15 @@ public class TimeServer {
         }
     }
 
-    private Model.Package getPassword(BufferedReader reader, PrintWriter writer) throws IOException {
+    private String getPassword(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
             writer.println("Enter your password (or 'q' to quit):");
-            Model.Package password = readInput(reader);
+            String password = readInput(reader).getMessage();
             System.out.println("PasssWord" + password);
-            if (password.getMessage().equalsIgnoreCase("q")) {
+            if (password.equalsIgnoreCase("q")) {
                 return null;
             }
-            if (!password.getMessage().isEmpty()) {
+            if (!password.isEmpty()) {
                 return password;
             }
             writer.println("Password cannot be empty.");
@@ -207,6 +214,7 @@ public class TimeServer {
             String token = UUID.randomUUID().toString();
 
             storingCredentials(c, token);
+
             Model.Package p = new Package("Registration successful. Welcome " + username, token);
 
             writer.println(p.serialize());
@@ -218,12 +226,8 @@ public class TimeServer {
         }
     }
 
-    private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer, String Token) {
+    private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer) {
         try {
-            if(Token != null){
-                
-            }
-
             Map<String, String[]> credentials = readCredentials();
             if (!credentials.containsKey(username)) {
                 writer.println("Username not found");
@@ -264,7 +268,51 @@ public class TimeServer {
             return null;
         }
     }
+    
+    private  Client handleLoginWithToken(Socket sockClient,PrintWriter writer,String Token){
+        if(Token != null && !Token.isEmpty()){
+            Map<String, String[]> tokenRecords = utils.readTokens();
+            if (tokenRecords.containsKey(Token)) {
+                String[] tokenData = tokenRecords.get(Token);
+                String userId = tokenData[0];  
+                String timestamp = tokenData[1];  
+                
+                // Check if token is expired (example: 24 hour validity)
+                long currentTime = System.currentTimeMillis();
+                if (false) { // todo
+                    writer.println("Token has expired");
+                    System.out.println("[INFO]TOKEN EXPRIED");
+                    return null;
+                }
+                
+                // for (Client c : clients) {
+                //     if (c.getId() == Integer.parseInt(userId)) {
+                //         writer.println("User already logged in");
+                //         System.out.println("ALREADY LOGGED IN");
 
+                //         return c;
+                //     }
+                // }
+                
+                Client c = new Client(
+                    Integer.parseInt(userId),
+                    sockClient.getInetAddress(),
+                    userId, // TODO START STORING username in tokens.txt
+                    "", // No password hash needed for token login
+                    false
+                );
+                clients.add(c);
+                writer.println("Login successful with token. Welcome back " + userId);
+                System.out.println("[INFO] User ID " + userId + " successfully logged in with token.");
+                
+                return c;
+            } else {
+                writer.println("Invalid token");
+                return null;
+            }
+        }
+        return null;
+    }
     private boolean isUsernameTaken(String username) throws IOException {
         return readCredentials().containsKey(username);
     }
@@ -338,7 +386,9 @@ public class TimeServer {
 
             }
             if(input.equals("/logout")){
-                c = null;
+                System.out.println("DESLOGOU");
+                c.setState(ClientState.LOGGED_OUT);
+                clients.remove(c); 
                 return;
             }
             if(input.equals("/create")){
