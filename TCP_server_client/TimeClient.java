@@ -3,6 +3,8 @@ import java.awt.event.*;
 import java.net.*;
 import java.io.*;
 
+import Model.Package;
+
 public class TimeClient {
     private Frame frame;
     private TextArea outputArea;
@@ -17,6 +19,7 @@ public class TimeClient {
     private Label statusLabel;
     private boolean isLoggedIn = false;
     private String currentUsername = null;
+    private String userToken = "";
 
     public TimeClient(String hostname, int port) {
         this.hostname = hostname;
@@ -243,7 +246,8 @@ public class TimeClient {
                     shouldReconnect = false;
                     appendToOutput("Exiting application...");
                     if (writer != null) {
-                        writer.println(input);  
+                        Package p = new Package(input, userToken);
+                        writer.println(p.serialize());
                     }
                     closeConnection();
                     frame.dispose();
@@ -254,7 +258,8 @@ public class TimeClient {
                     shouldReconnect = false;
                     appendToOutput("Disconnecting from server...");
                     if (writer != null) {
-                        writer.println(input); 
+                        Package p = new Package(input, userToken);
+                        writer.println(p.serialize());
                     }
                     closeConnection();
                     statusLabel.setText("Status: Disconnected");
@@ -311,7 +316,8 @@ public class TimeClient {
         }
         
         if (writer != null) {
-            writer.println(input);
+            Package p = new Package(input, userToken);
+            writer.println(p.serialize());
         } else {
             appendToOutput("Not connected to server. Please connect first.");
         }
@@ -324,8 +330,8 @@ public class TimeClient {
                 text.contains("\u001b[3J") ||
                 text.contains("\u001bc")) {
                 outputArea.setText("");
-            return;
-        }            
+                return;
+            }            
             if (text.trim().isEmpty()) {
                 return;
             }
@@ -408,9 +414,12 @@ public class TimeClient {
             try (BufferedReader reader = new BufferedReader(
                     new InputStreamReader(socket.getInputStream()))) {
                 
-                String serverResponse;
-                while ((serverResponse = reader.readLine()) != null) {
-                    appendToOutput(serverResponse);
+                Package serverResponse;
+                while ((serverResponse = Model.Package.readInput(reader)) != null) {
+                    appendToOutput(serverResponse.getMessage());
+                    if(serverResponse.getToken() != null && serverResponse.getToken().length() > 1){
+                        userToken = serverResponse.getToken();
+                    }
                 }
                 
                 appendToOutput("Server has disconnected");
