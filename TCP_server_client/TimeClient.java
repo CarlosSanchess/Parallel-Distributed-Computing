@@ -283,35 +283,6 @@ public class TimeClient {
                 case "/help":
                     showHelpDialog();
                     return;
-                    
-                case "/register":
-                    if (parts.length < 2) {
-                        appendToOutput("Usage: /register <username> <password>");
-                        return;
-                    }
-                    if (isLoggedIn) {
-                        appendToOutput("You are already logged in as " + currentUsername);
-                        return;
-                    }
-                    break;
-                    
-                case "/login":
-                    if (parts.length < 2) {
-                        appendToOutput("Usage: /login <username> <password>");
-                        return;
-                    }
-                    if (isLoggedIn) {
-                        appendToOutput("You are already logged in as " + currentUsername);
-                        return;
-                    }
-                    break;
-                    
-                case "/logout":
-                    if (!isLoggedIn) {
-                        appendToOutput("You are not logged in");
-                        return;
-                    }
-                    break;
             }
         }
         
