@@ -125,12 +125,13 @@ public class TimeServer {
         Model.Package choice = getValidChoice(reader, writer);
         if (choice == null) return null;
 
-        if(choice.getMessage().equals("2")){
-            Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
-            if(c != null){
-                return c;
-            }
-        }
+        // if(choice.getMessage().equals("2")){
+        //     Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
+        //     System.out.println("asdsad");
+        //     if(c != null){
+        //         return c;
+        //     }
+        // }
 
         String username = getUsername(reader, writer);
         if (username == null) return null;
@@ -228,6 +229,7 @@ public class TimeServer {
 
     private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer) {
         try {
+            System.out.println("Entrou no login ");
             Map<String, String[]> credentials = readCredentials();
             if (!credentials.containsKey(username)) {
                 writer.println("Username not found");
@@ -260,10 +262,12 @@ public class TimeServer {
                 System.out.println("[INFO] User " + username + " successfully logged in.");
                 return c;
             } else {
+                System.out.println("Invalid Password");
                 writer.println("Invalid password");
                 return null;
             }
         } catch (Exception e) {
+            System.out.println(e);
             writer.println("Error during login.");
             return null;
         }
@@ -330,10 +334,14 @@ public class TimeServer {
         
         try (BufferedReader reader = new BufferedReader(new FileReader(file))) {
             String line;
-            while ((line = readInput(reader).getMessage()) != null) {
-                String[] parts = line.split(",");
-                if (parts.length >= 4) {
-                    credentials.put(parts[2], parts);
+            Package pkg;
+            while ((pkg = readInput(reader)) != null) { 
+                line = pkg.getMessage();               
+                if (line != null) {                     
+                    String[] parts = line.split(",");
+                    if (parts.length >= 4) {
+                        credentials.put(parts[2], parts);
+                    }
                 }
             }
         }

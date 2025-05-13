@@ -69,7 +69,7 @@ public class TimeClient {
         String input = inputField.getText();
         inputField.setText("");
         
-        if (writer != null) {
+        if (writer != null && input != null) {
             Package p = new Package(input, userToken);
             writer.println(p.serialize());
             
