@@ -126,11 +126,20 @@ public class TimeServer {
         if (choice == null) return null;
 
         if(choice.getMessage().equals("2")){
+<<<<<<< HEAD
             Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
             if(c != null){
                 return c;
             }
         }
+=======
+             Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
+             System.out.println("asdsad");
+             if(c != null){
+                 return c;
+             }
+     }
+>>>>>>> ead8e5668a347a5eb54a0f5e13157fae5b667ada
 
         String username = getUsername(reader, writer);
         if (username == null) return null;
