@@ -125,13 +125,12 @@ public class TimeServer {
         Model.Package choice = getValidChoice(reader, writer);
         if (choice == null) return null;
 
-        // if(choice.getMessage().equals("2")){
-        //     Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
-        //     System.out.println("asdsad");
-        //     if(c != null){
-        //         return c;
-        //     }
-        // }
+        if(choice.getMessage().equals("2")){
+            Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
+            if(c != null){
+                return c;
+            }
+        }
 
         String username = getUsername(reader, writer);
         if (username == null) return null;
@@ -284,7 +283,7 @@ public class TimeServer {
                 
                 // Check if token is expired (example: 24 hour validity)
                 long currentTime = System.currentTimeMillis();
-                if (currentTime > Long.parseLong(timestamp)) { // todo
+                if (false) { // TODO
                     System.out.println("Current Time :"+ currentTime);
                     System.out.println("Time stamp: " + timestamp);
                     writer.println("Token has expired");
@@ -372,7 +371,7 @@ public class TimeServer {
     }
     
     private void showMainHub(Client c, Socket sockClient) throws IOException {
-        Room testRoom = new Room(0,"TestRoom", 5, false); // name: TestRoom, max 5 members, not AI
+        Room testRoom = new Room(rooms.size(),"TestRoom", 5, false); // name: TestRoom, max 5 members, not AI
         rooms.add(testRoom);
         BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
         PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
@@ -412,7 +411,10 @@ public class TimeServer {
                 writer.println("Invalid command. Use: /join <room number> or /create to create a room");
                 continue;
             }
-
+            if(input.equals("/disconnect")) {
+               handleDisconnect(c, sockClient, writer);
+               return;
+            }
             String[] parts = input.split("\\s+");
             if (parts.length < 2) {
                 writer.println("Missing room number. Usage: /join <room number>");
@@ -497,6 +499,11 @@ public class TimeServer {
                         writer.println("You have left the room.");
                         break;
                     } else {
+                        if(response.equals("/disconnect"))
+                        {
+                            handleDisconnect(c, sockClient, writer);
+                            break;
+                        }
                         lock.lock();
                         try {
                             room.addMessage(new Message(c.getName(), response));
@@ -640,10 +647,44 @@ public class TimeServer {
         }
         return response;
     }
-
+    private void handleDisconnect(Client c, Socket sockClient, PrintWriter writer) {
+        try {
+            if (c.getState() == ClientState.IN_ROOM) {
+                lock.lock();
+                try {
+                    for (Room room : rooms) {
+                        if (room.getId() == c.getRoomId()) {
+                            room.removeMember(c);
+                            System.out.println("[INFO] " + c.getName() + " left room " + room.getName());
+                            break;
+                        }
+                    }
+                    c.leaveRoom();
+                } finally {
+                    lock.unlock();
+                }
+            }
+    
+            clients.remove(c);
+            System.out.println("[INFO] " + c.getName() + " disconnected");
+    
+           
+            sockClient.close();
+            
+        } catch (IOException e) {
+            System.err.println("[ERROR] Error disconnecting client " + c.getName() + ": " + e.getMessage());
+        } finally {
+            if (clients.contains(c)) {
+                clients.remove(c);
+            }
+        }
+    }
     private Model.Package readInput(BufferedReader reader){
         Model.Package p = Model.Package.readInput(reader);
-        return p;
+        // if(p.getMessage().equals("/disconnect")){
+        //     handleDisconnect(null, null, null);
+        // }
+         return p;
     }
 
    

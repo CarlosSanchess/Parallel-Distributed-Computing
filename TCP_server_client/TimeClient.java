@@ -48,13 +48,7 @@ public class TimeClient {
         });
         
         disconnectButton.addActionListener(e -> {
-            shouldReconnect = false;
-            closeConnection();
-            statusLabel.setText("Status: Disconnected");
-            connectButton.setEnabled(true);
-            disconnectButton.setEnabled(false);
-            isLoggedIn = false;
-            currentUsername = null;
+            disconnect();
         });
         
         disconnectButton.setEnabled(false);
@@ -255,18 +249,7 @@ public class TimeClient {
                     return;
                     
                 case "/disconnect":
-                    shouldReconnect = false;
-                    appendToOutput("Disconnecting from server...");
-                    if (writer != null) {
-                        Package p = new Package(input, userToken);
-                        writer.println(p.serialize());
-                    }
-                    closeConnection();
-                    statusLabel.setText("Status: Disconnected");
-                    connectButton.setEnabled(true);
-                    disconnectButton.setEnabled(false);
-                    isLoggedIn = false;
-                    currentUsername = null;
+                    disconnect();
                     return;
                     
                 case "/reconnect":
@@ -283,35 +266,6 @@ public class TimeClient {
                 case "/help":
                     showHelpDialog();
                     return;
-                    
-                case "/register":
-                    if (parts.length < 2) {
-                        appendToOutput("Usage: /register <username> <password>");
-                        return;
-                    }
-                    if (isLoggedIn) {
-                        appendToOutput("You are already logged in as " + currentUsername);
-                        return;
-                    }
-                    break;
-                    
-                case "/login":
-                    if (parts.length < 2) {
-                        appendToOutput("Usage: /login <username> <password>");
-                        return;
-                    }
-                    if (isLoggedIn) {
-                        appendToOutput("You are already logged in as " + currentUsername);
-                        return;
-                    }
-                    break;
-                    
-                case "/logout":
-                    if (!isLoggedIn) {
-                        appendToOutput("You are not logged in");
-                        return;
-                    }
-                    break;
             }
         }
         
@@ -456,6 +410,24 @@ public class TimeClient {
         }
     }
 
+    private void disconnect(){
+        shouldReconnect = false;
+
+        outputArea.setText("");
+        appendToOutput("Disconnecting from server...");
+        if (writer != null) {
+            System.out.println("Mnadou disconnect");
+            Package p = new Package("/disconnect", userToken);
+            writer.println(p.serialize());
+        }
+        closeConnection();
+        statusLabel.setText("Status: Disconnected");
+        connectButton.setEnabled(true);
+        disconnectButton.setEnabled(false);
+        isLoggedIn = false;
+        currentUsername = null;
+        return;
+    }
     public static void main(String[] args) {
         String hostname = "localhost";
         int port = 8080;
