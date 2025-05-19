@@ -403,8 +403,11 @@ public class TimeServer {
 
             }
             if(input.equals("/logout")){
+                lock.lock();
                 c.setState(ClientState.LOGGED_OUT);
                 clients.remove(c); 
+                utils.removeToken(String.valueOf(c.getId()), c.getName());
+                lock.unlock();
                 return;
             }
             if(input.equals("/create")){
@@ -502,7 +505,6 @@ public class TimeServer {
                         writer.println("You have left the room.");
                         break;
                     } else {
-<<<<<<< HEAD
                         lock.lock();
 
                             if(response.equals("/disconnect"))
@@ -520,25 +522,6 @@ public class TimeServer {
                                 System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
 
                         lock.unlock();
-=======
-                        if(response.equals("/disconnect")) {
-                            handleDisconnect(c, sockClient, writer);
-                            break;
-                        }
-                        lock.lock();
-                        try {
-                            room.addMessage(new Message(c.getName(), response));
-                            System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
-
-                            if (room.getIsAi()) {
-                                String aiResponse = AIIntegration.performQuery(response, room.getMessages());
-                                room.addMessage(new Message("AI Bot", aiResponse));
-                                System.out.println("[INFO]: AI responded in room " + roomId);
-                            }
-                        } finally {
-                            lock.unlock();
-                        }
->>>>>>> 16ed6abc349b3f02b085f2f1f444d4230ce5e202
                     }
                 }
             }

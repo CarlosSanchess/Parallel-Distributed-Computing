@@ -139,4 +139,43 @@ public class utils {
                 return "Error updating token";
             }
         }
+
+        public static void removeToken(String userId, String username) {
+            try {
+                Map<String, String[]> tokenMap = readTokens();
+                
+                boolean removed = tokenMap.entrySet().removeIf(entry -> {
+                    String[] data = entry.getValue();
+                    return data[0].equals(userId) && data[1].equals(username);
+                });
+                
+                if (!removed) {
+                    System.out.println("[INFO] No matching token found for userId: " + userId + ", username: " + username);
+                    return;
+                }
+                
+                Path path = Paths.get("tokens.txt");
+                List<String> lines = new ArrayList<>();
+                
+                for (Map.Entry<String, String[]> entry : tokenMap.entrySet()) {
+                    String[] data = entry.getValue();
+                    String line = String.join(",", 
+                        data[0],  // userId
+                        data[1],  // username
+                        entry.getKey(),  // token
+                        data[2]  // timestamp
+                    );
+                    lines.add(line);
+                }
+                
+                Files.write(path, lines, StandardCharsets.UTF_8);
+                System.out.println("[INFO] Successfully removed token for userId: " + userId + ", username: " + username);
+            } catch (IOException e) {
+                System.err.println("[ERROR] Failed to update tokens file while removing token");
+                e.printStackTrace();
+            } catch (Exception e) {
+                System.err.println("[ERROR] Unexpected error while removing token");
+                e.printStackTrace();
+            }
+        }
 }
