@@ -153,7 +153,6 @@ public class TimeServer {
     private Model.Package getValidChoice(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
             Model.Package choice = readInput(reader);
-            System.out.println("PasssWord" + choice.getMessage());
             if (choice.getMessage().equalsIgnoreCase("q")) {
                 writer.println("Exiting...");
                 utils.safeSleep(500);
@@ -264,7 +263,7 @@ public class TimeServer {
                 writer.println(p.serialize());
 
                 System.out.println("[INFO] User " + username + " successfully logged in.");
-                
+
                 return c;
             } else {
                 System.out.println("Invalid Password");
@@ -403,7 +402,6 @@ public class TimeServer {
 
             }
             if(input.equals("/logout")){
-                System.out.println("DESLOGOU");
                 c.setState(ClientState.LOGGED_OUT);
                 clients.remove(c); 
                 return;
