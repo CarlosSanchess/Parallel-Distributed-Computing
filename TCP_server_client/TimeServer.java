@@ -10,6 +10,7 @@ import Model.*;
 import Model.Package;
 import Model.Client.ClientState;
 import utils.shaHash;
+import utils.AIIntegration;
 import utils.outputPrints;
 import utils.utils;
 
@@ -126,20 +127,11 @@ public class TimeServer {
         if (choice == null) return null;
 
         if(choice.getMessage().equals("2")){
-<<<<<<< HEAD
             Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
             if(c != null){
                 return c;
             }
         }
-=======
-             Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
-             System.out.println("asdsad");
-             if(c != null){
-                 return c;
-             }
-     }
->>>>>>> ead8e5668a347a5eb54a0f5e13157fae5b667ada
 
         String username = getUsername(reader, writer);
         if (username == null) return null;
@@ -478,22 +470,20 @@ public class TimeServer {
         } finally {
             lock.unlock();
         }
-    
+
         if (room == null) {
             writer.println("Error: Room not found.");
             System.out.println("[ERROR]: Room not found.");
             c.setState(ClientState.NOT_IN_ROOM);
             return;
         }
-    
+
         try {
             while (true) {
                 outputPrints.cleanClientTerminal(writer);
                 outputPrints.viewRoom(room, writer);
                 
-                
-                String response = checkInputWithDelay(reader,1000);
-               
+                String response = checkInputWithDelay(reader, 1000);
                 
                 if (response != null) {
                     if (response.equals("/quit")) {
@@ -508,20 +498,20 @@ public class TimeServer {
                         writer.println("You have left the room.");
                         break;
                     } else {
-                        if(response.equals("/disconnect"))
-                        {
+                        if(response.equals("/disconnect")) {
                             handleDisconnect(c, sockClient, writer);
                             break;
                         }
                         lock.lock();
                         try {
                             room.addMessage(new Message(c.getName(), response));
-                            //if(room.getIsAi()){
-                                // room.addMessage(new Message("Ai Bot", AIIntegration.performQuery(response, room.getMessages())));
-                                // TODO
-                            //}
- 
                             System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
+
+                            if (room.getIsAi()) {
+                                String aiResponse = AIIntegration.performQuery(response, room.getMessages());
+                                room.addMessage(new Message("AI Bot", aiResponse));
+                                System.out.println("[INFO]: AI responded in room " + roomId);
+                            }
                         } finally {
                             lock.unlock();
                         }

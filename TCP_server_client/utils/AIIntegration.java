@@ -4,114 +4,202 @@ import java.io.*;
 import java.net.*;
 import java.util.*;
 import java.util.concurrent.locks.*;
+import java.util.logging.*;
 import Model.Message;
 
 public class AIIntegration {
     private static final String OLLAMA_URL = "http://localhost:11434/api/generate";
+    private static final String AI_MODEL = "llama3";
     private static final ReentrantLock requestLock = new ReentrantLock();
-    private static final Condition requestCondition = requestLock.newCondition();
     
     private static final Map<String, String> responseCache = new HashMap<>();
     private static final ReentrantLock cacheLock = new ReentrantLock();
+    private static final long CACHE_TTL = 10 * 60 * 1000; 
     
-    private static Thread cacheCleanerThread;
-
+    private static volatile boolean isOllamaAvailable = true;
+    private static final int MAX_RETRIES = 2;
+    private static final int RETRY_DELAY_MS = 1000;
+    
+    private static final Logger LOGGER = Logger.getLogger(AIIntegration.class.getName());
+    
     static {
-        startCacheCleaner();
-    }
-
-    private static void startCacheCleaner() {
-        cacheCleanerThread = Thread.startVirtualThread(() -> {
-            while (true) {
-                try {
-                    Thread.sleep(10 * 60 * 1000); 
-                    cacheLock.lock();
-                    try {
-                        responseCache.clear();
-                    } finally {
-                        cacheLock.unlock();
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        });
+        try {
+            Handler fileHandler = new FileHandler("ai_integration.log", true);
+            fileHandler.setFormatter(new SimpleFormatter());
+            LOGGER.addHandler(fileHandler);
+            LOGGER.setLevel(Level.INFO);
+        } catch (IOException e) {
+            System.err.println("Failed to initialize logger: " + e.getMessage());
+        }
     }
 
     public static String performQuery(String prompt, List<Message> conversationHistory) {
+        if (prompt == null || prompt.trim().isEmpty()) {
+            LOGGER.warning("Empty prompt received, rejecting request");
+            return "Cannot process empty prompt";
+        }
+        
+        if (!isOllamaAvailable) {
+            LOGGER.warning("Ollama marked as unavailable, rejecting request");
+            return "AI service is currently unavailable. Please try again later.";
+        }
+
         String cacheKey = buildCacheKey(prompt, conversationHistory);
         
         cacheLock.lock();
         try {
             String cachedResponse = responseCache.get(cacheKey);
             if (cachedResponse != null) {
+                LOGGER.info("Cache hit for prompt: " + prompt);
                 return cachedResponse;
             }
         } finally {
             cacheLock.unlock();
         }
         
+        LOGGER.info("Processing new query: " + prompt);
+        
         requestLock.lock();
         try {
             String context = buildContext(prompt, conversationHistory);
             String requestBody = buildJsonRequest(context);
             
-            // Fix for deprecated URL constructor
-            URI uri = new URI(OLLAMA_URL);
-            HttpURLConnection connection = (HttpURLConnection) uri.toURL().openConnection();
-            
-            try {
-                connection.setRequestMethod("POST");
-                connection.setRequestProperty("Content-Type", "application/json");
-                connection.setDoOutput(true);
-                connection.setConnectTimeout(5000); 
-                connection.setReadTimeout(30000); 
-                
-                try (OutputStream os = connection.getOutputStream()) {
-                    os.write(requestBody.getBytes("utf-8"));
-                }
-                
-                int responseCode = connection.getResponseCode();
-                if (responseCode == HttpURLConnection.HTTP_OK) {
-                    try (BufferedReader br = new BufferedReader(
-                        new InputStreamReader(connection.getInputStream(), "utf-8"))) {
-                        StringBuilder response = new StringBuilder();
-                        String responseLine;
-                        while ((responseLine = br.readLine()) != null) {
-                            response.append(responseLine.trim());
-                        }
-                        
-                        String aiResponse = parseJsonResponse(response.toString());
-                        
-                        cacheLock.lock();
-                        try {
-                            responseCache.put(cacheKey, aiResponse);
-                        } finally {
-                            cacheLock.unlock();
-                        }
-                        
-                        return aiResponse;
+            for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                if (attempt > 0) {
+                    LOGGER.info("Retry attempt " + attempt + " for query");
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS * attempt);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        LOGGER.warning("Retry delay interrupted");
                     }
-                } else {
-                    System.err.println("Ollama API request failed with code: " + responseCode);
-                    return "Sorry, I'm having trouble thinking right now.";
                 }
-            } finally {
-                connection.disconnect();
+                
+                String response = sendRequest(requestBody);
+                if (response != null) {
+                    return response;
+                }
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "Error processing your request: " + e.getMessage();
+            
+            LOGGER.severe("All retry attempts failed");
+            return "Unable to get a response from the AI service after multiple attempts.";
         } finally {
             requestLock.unlock();
         }
     }
+    
+    private static String sendRequest(String requestBody) {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(OLLAMA_URL);
+            connection = (HttpURLConnection) url.openConnection();
+            
+            connection.setRequestMethod("POST");
+            connection.setRequestProperty("Content-Type", "application/json");
+            connection.setDoOutput(true);
+            connection.setConnectTimeout(5000);
+            connection.setReadTimeout(60000);  
+            
+            LOGGER.fine("Sending request to Ollama API");
+            try (OutputStream os = connection.getOutputStream()) {
+                os.write(requestBody.getBytes("UTF-8"));
+            }
+            
+            int responseCode = connection.getResponseCode();
+            LOGGER.info("Received response code: " + responseCode);
+            
+            if (responseCode == HttpURLConnection.HTTP_OK) {
+                try (BufferedReader br = new BufferedReader(
+                    new InputStreamReader(connection.getInputStream(), "UTF-8"))) {
+                    
+                    String responseText = readAllLines(br);
+                    String aiResponse = parseJsonResponse(responseText);
+                    
+                    if (aiResponse == null || aiResponse.isEmpty()) {
+                        LOGGER.warning("Received empty response from Ollama");
+                        return "AI returned an empty response.";
+                    }
+                    
+                    String cacheKey = buildCacheKey(requestBody, null);
+                    cacheLock.lock();
+                    try {
+                        responseCache.put(cacheKey, aiResponse);
+                        scheduleCacheCleanup(cacheKey);
+                    } finally {
+                        cacheLock.unlock();
+                    }
+                    
+                    isOllamaAvailable = true;
+                    LOGGER.info("Successfully received AI response of length: " + aiResponse.length());
+                    return aiResponse;
+                }
+            } else {
+                handleErrorResponse(responseCode);
+                LOGGER.warning("API error response: " + responseCode);
+                return null;
+            }
+        } catch (ConnectException | SocketTimeoutException e) {
+            isOllamaAvailable = false;
+            LOGGER.severe("Connection error: " + e.getMessage());
+            return null;
+        } catch (IOException e) {
+            isOllamaAvailable = false;
+            LOGGER.severe("I/O error: " + e.getMessage());
+            return null;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    private static String readAllLines(BufferedReader reader) throws IOException {
+        StringBuilder response = new StringBuilder();
+        String line;
+        while ((line = reader.readLine()) != null) {
+            response.append(line);
+        }
+        return response.toString();
+    }
+
+    private static void handleErrorResponse(int responseCode) {
+        isOllamaAvailable = (responseCode != HttpURLConnection.HTTP_NOT_FOUND && 
+                            responseCode != HttpURLConnection.HTTP_UNAVAILABLE);
+                            
+        if (responseCode >= 500) {
+            LOGGER.severe("Server error from Ollama API: " + responseCode);
+        } else if (responseCode >= 400) {
+            LOGGER.warning("Client error in Ollama API request: " + responseCode);
+        }
+    }
+
+    private static void scheduleCacheCleanup(String key) {
+        new Timer().schedule(new TimerTask() {
+            @Override
+            public void run() {
+                cacheLock.lock();
+                try {
+                    responseCache.remove(key);
+                    LOGGER.fine("Removed expired cache entry: " + key);
+                } finally {
+                    cacheLock.unlock();
+                }
+            }
+        }, CACHE_TTL);
+    }
 
     private static String buildContext(String prompt, List<Message> history) {
         StringBuilder context = new StringBuilder();
-        for (Message message : history) {
-            context.append(message.getAuthor()).append(": ").append(message.getContent()).append("\n");
+        if (history != null && !history.isEmpty()) {
+            LOGGER.fine("Building context with " + history.size() + " historical messages");
+            for (Message message : history) {
+                if (message != null && message.getAuthor() != null && message.getContent() != null) {
+                    context.append(message.getAuthor())
+                          .append(": ")
+                          .append(message.getContent())
+                          .append("\n");
+                }
+            }
         }
         context.append(prompt);
         return context.toString();
@@ -119,20 +207,28 @@ public class AIIntegration {
 
     private static String buildCacheKey(String prompt, List<Message> history) {
         StringBuilder key = new StringBuilder(prompt);
-        for (Message message : history) {
-            key.append(message.getAuthor()).append(message.getContent());
+        if (history != null) {
+            for (Message message : history) {
+                if (message != null && message.getAuthor() != null && message.getContent() != null) {
+                    key.append(message.getAuthor())
+                       .append(message.getContent());
+                }
+            }
         }
         return key.toString();
     }
 
     private static String buildJsonRequest(String context) {
         return String.format(
-            "{\"model\":\"llama3\",\"prompt\":\"%s\",\"stream\":false}",
+            "{\"model\":\"%s\",\"prompt\":\"%s\",\"stream\":false}",
+            AI_MODEL,
             escapeJsonString(context)
         );
     }
 
     private static String escapeJsonString(String input) {
+        if (input == null) return "";
+        
         StringBuilder sb = new StringBuilder();
         for (char c : input.toCharArray()) {
             switch (c) {
@@ -141,42 +237,141 @@ public class AIIntegration {
                 case '\n': sb.append("\\n"); break;
                 case '\r': sb.append("\\r"); break;
                 case '\t': sb.append("\\t"); break;
-                default: sb.append(c);
+                case '\b': sb.append("\\b"); break;
+                case '\f': sb.append("\\f"); break;
+                default:
+                    if (c < 32) {
+                        String hex = Integer.toHexString(c);
+                        sb.append("\\u");
+                        for (int i = 0; i < 4 - hex.length(); i++) {
+                            sb.append('0');
+                        }
+                        sb.append(hex);
+                    } else {
+                        sb.append(c);
+                    }
             }
         }
         return sb.toString();
     }
 
     private static String parseJsonResponse(String json) {
-        int responseStart = json.indexOf("\"response\":\"") + 12;
-        if (responseStart < 12) return "";
-        
-        int responseEnd = json.indexOf("\"", responseStart);
-        if (responseEnd < 0) responseEnd = json.length() - 1;
-        
-        StringBuilder result = new StringBuilder();
-        boolean escape = false;
-        
-        for (int i = responseStart; i < responseEnd; i++) {
-            char c = json.charAt(i);
+        try {
+            if (json == null || json.isEmpty()) {
+                LOGGER.warning("Empty JSON response received");
+                return "No response from AI";
+            }
             
-            if (escape) {
-                switch (c) {
-                    case '"': result.append('"'); break;
-                    case 'n': result.append('\n'); break;
-                    case 'r': result.append('\r'); break;
-                    case 't': result.append('\t'); break;
-                    case '\\': result.append('\\'); break;
-                    default: result.append('\\').append(c);
+            int responseStart = json.indexOf("\"response\":\"") + 12;
+            if (responseStart < 12) {
+                LOGGER.warning("Invalid JSON response format: " + json);
+                return "No response from AI";
+            }
+            
+            int responseEnd = json.indexOf("\"", responseStart);
+            if (responseEnd < 0) responseEnd = json.length() - 1;
+            
+            StringBuilder result = new StringBuilder();
+            boolean escape = false;
+            
+            for (int i = responseStart; i < responseEnd; i++) {
+                char c = json.charAt(i);
+                
+                if (escape) {
+                    switch (c) {
+                        case '"': result.append('"'); break;
+                        case 'n': result.append('\n'); break;
+                        case 'r': result.append('\r'); break;
+                        case 't': result.append('\t'); break;
+                        case '\\': result.append('\\'); break;
+                        case 'b': result.append('\b'); break;
+                        case 'f': result.append('\f'); break;
+                        case 'u':
+                            if (i + 4 < responseEnd) {
+                                String hex = json.substring(i + 1, i + 5);
+                                try {
+                                    int unicodeChar = Integer.parseInt(hex, 16);
+                                    result.append((char) unicodeChar);
+                                    i += 4;
+                                } catch (NumberFormatException e) {
+                                    result.append("\\u").append(hex);
+                                    i += 4;
+                                }
+                            } else {
+                                result.append('\\').append(c);
+                            }
+                            break;
+                        default: result.append('\\').append(c);
+                    }
+                    escape = false;
+                } else if (c == '\\') {
+                    escape = true;
+                } else {
+                    result.append(c);
                 }
-                escape = false;
-            } else if (c == '\\') {
-                escape = true;
-            } else {
-                result.append(c);
+            }
+            
+            return result.toString();
+        } catch (Exception e) {
+            LOGGER.severe("Error parsing AI response: " + e.getMessage());
+            return "Error parsing AI response: " + e.getMessage();
+        }
+    }
+
+    public static boolean isOllamaAvailable() {
+        return isOllamaAvailable;
+    }
+    
+    public static void setOllamaAvailability(boolean available) {
+        isOllamaAvailable = available;
+        LOGGER.info("Ollama availability set to: " + available);
+    }
+    
+    public static boolean pingOllama() {
+        HttpURLConnection connection = null;
+        try {
+            URI uri = URI.create("http://localhost:11434/api/version");
+            URL url = uri.toURL();
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(3000);
+            connection.setReadTimeout(3000);
+            
+            int responseCode = connection.getResponseCode();
+            boolean available = (responseCode == HttpURLConnection.HTTP_OK);
+            
+            isOllamaAvailable = available;
+            LOGGER.info("Ollama ping result: " + available + " (response code: " + responseCode + ")");
+            
+            return available;
+        } catch (Exception e) {
+            isOllamaAvailable = false;
+            LOGGER.warning("Ollama ping failed: " + e.getMessage());
+            return false;
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
             }
         }
-        
-        return result.toString();
+    }
+    
+    public static void clearCache() {
+        cacheLock.lock();
+        try {
+            int cacheSize = responseCache.size();
+            responseCache.clear();
+            LOGGER.info("Cache cleared. Removed " + cacheSize + " entries.");
+        } finally {
+            cacheLock.unlock();
+        }
+    }
+    
+    public static int getCacheSize() {
+        cacheLock.lock();
+        try {
+            return responseCache.size();
+        } finally {
+            cacheLock.unlock();
+        }
     }
 }
