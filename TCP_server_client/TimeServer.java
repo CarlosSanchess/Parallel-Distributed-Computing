@@ -257,8 +257,14 @@ public class TimeServer {
                     false
                 );
                 clients.add(c);
-                writer.println("Login successful. Welcome back " + username);
+
+                String token = UUID.randomUUID().toString();
+                utils.updateOrCreateEntry(token,creds[0], username);
+                Model.Package p = new Package("Login successful. Welcome back " + username, token);
+                writer.println(p.serialize());
+
                 System.out.println("[INFO] User " + username + " successfully logged in.");
+                
                 return c;
             } else {
                 System.out.println("Invalid Password");
@@ -499,23 +505,23 @@ public class TimeServer {
                         writer.println("You have left the room.");
                         break;
                     } else {
-                        if(response.equals("/disconnect"))
-                        {
-                            handleDisconnect(c, sockClient, writer);
-                            break;
-                        }
                         lock.lock();
-                        try {
-                            room.addMessage(new Message(c.getName(), response));
-                            //if(room.getIsAi()){
-                                // room.addMessage(new Message("Ai Bot", AIIntegration.performQuery(response, room.getMessages())));
-                                // TODO
-                            //}
- 
-                            System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
-                        } finally {
-                            lock.unlock();
-                        }
+
+                            if(response.equals("/disconnect"))
+                            {
+                                handleDisconnect(c, sockClient, writer);
+                                break;
+                            }
+
+                                room.addMessage(new Message(c.getName(), response));
+                                //if(room.getIsAi()){
+                                    // room.addMessage(new Message("Ai Bot", AIIntegration.performQuery(response, room.getMessages())));
+                                    // TODO
+                                //}
+    
+                                System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
+
+                        lock.unlock();
                     }
                 }
             }
@@ -650,8 +656,6 @@ public class TimeServer {
     private void handleDisconnect(Client c, Socket sockClient, PrintWriter writer) {
         try {
             if (c.getState() == ClientState.IN_ROOM) {
-                lock.lock();
-                try {
                     for (Room room : rooms) {
                         if (room.getId() == c.getRoomId()) {
                             room.removeMember(c);
@@ -660,9 +664,7 @@ public class TimeServer {
                         }
                     }
                     c.leaveRoom();
-                } finally {
-                    lock.unlock();
-                }
+                
             }
     
             clients.remove(c);

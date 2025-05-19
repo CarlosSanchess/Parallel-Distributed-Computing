@@ -7,6 +7,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -93,4 +94,49 @@ public class utils {
         System.out.println("[DEBUG] Loaded " + tokenMap.size() + " valid tokens");
         return tokenMap;
     }
+
+    public static String updateOrCreateEntry(String Token, String userId, String username) {
+            Map<String, String[]> tokenMap = readTokens();
+            
+            tokenMap.entrySet().removeIf(entry -> {
+                String[] data = entry.getValue();
+                return data[0].equals(userId) && data[1].equals(username);
+            });
+            
+            long newTimestamp = System.currentTimeMillis() / 1000L + 3600;
+            String timestampStr = String.valueOf(newTimestamp);
+            
+            String[] newTokenData = {
+                userId,
+                username,
+                timestampStr
+            };
+            
+            tokenMap.put(Token, newTokenData);
+            
+            try {
+                Path path = Paths.get("tokens.txt");
+                List<String> lines = new ArrayList<>();
+                
+                
+                for (Map.Entry<String, String[]> entry : tokenMap.entrySet()) {
+                    String[] data = entry.getValue();
+                    String line = String.join(",", 
+                        data[0],  
+                        data[1],  
+                        entry.getKey(),  
+                        data[2]  
+                    );
+                    lines.add(line);
+                }
+                
+                Files.write(path, lines, StandardCharsets.UTF_8);
+                
+                return "Token updated/created successfully";
+            } catch (IOException e) {
+                System.err.println("[ERROR] Failed to write tokens file");
+                e.printStackTrace();
+                return "Error updating token";
+            }
+        }
 }
