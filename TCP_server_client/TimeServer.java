@@ -10,6 +10,7 @@ import Model.*;
 import Model.Package;
 import Model.Client.ClientState;
 import utils.shaHash;
+import utils.AIIntegration;
 import utils.outputPrints;
 import utils.utils;
 
@@ -473,22 +474,20 @@ public class TimeServer {
         } finally {
             lock.unlock();
         }
-    
+
         if (room == null) {
             writer.println("Error: Room not found.");
             System.out.println("[ERROR]: Room not found.");
             c.setState(ClientState.NOT_IN_ROOM);
             return;
         }
-    
+
         try {
             while (true) {
                 outputPrints.cleanClientTerminal(writer);
                 outputPrints.viewRoom(room, writer);
                 
-                
-                String response = checkInputWithDelay(reader,1000);
-               
+                String response = checkInputWithDelay(reader, 1000);
                 
                 if (response != null) {
                     if (response.equals("/quit")) {
@@ -503,6 +502,7 @@ public class TimeServer {
                         writer.println("You have left the room.");
                         break;
                     } else {
+<<<<<<< HEAD
                         lock.lock();
 
                             if(response.equals("/disconnect"))
@@ -520,6 +520,25 @@ public class TimeServer {
                                 System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
 
                         lock.unlock();
+=======
+                        if(response.equals("/disconnect")) {
+                            handleDisconnect(c, sockClient, writer);
+                            break;
+                        }
+                        lock.lock();
+                        try {
+                            room.addMessage(new Message(c.getName(), response));
+                            System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
+
+                            if (room.getIsAi()) {
+                                String aiResponse = AIIntegration.performQuery(response, room.getMessages());
+                                room.addMessage(new Message("AI Bot", aiResponse));
+                                System.out.println("[INFO]: AI responded in room " + roomId);
+                            }
+                        } finally {
+                            lock.unlock();
+                        }
+>>>>>>> 16ed6abc349b3f02b085f2f1f444d4230ce5e202
                     }
                 }
             }
