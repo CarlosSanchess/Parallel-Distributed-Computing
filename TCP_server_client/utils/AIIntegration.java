@@ -3,6 +3,7 @@ package utils;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
 import java.util.logging.*;
 import Model.Message;
@@ -20,6 +21,14 @@ public class AIIntegration {
     private static final int MAX_RETRIES = 2;
     private static final int RETRY_DELAY_MS = 1000;
     
+    private static final ExecutorService aiExecutor = 
+        Executors.newFixedThreadPool(5); 
+    
+    public interface AIResponseCallback {
+        void onResponseReceived(String response, String originalMessage);
+        void onError(String errorMessage, String originalMessage);
+    }
+    
     private static final Logger LOGGER = Logger.getLogger(AIIntegration.class.getName());
     
     static {
@@ -31,8 +40,101 @@ public class AIIntegration {
         } catch (IOException e) {
             System.err.println("Failed to initialize logger: " + e.getMessage());
         }
+        
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            LOGGER.info("Shutting down AI executor service");
+            aiExecutor.shutdown();
+            try {
+                if (!aiExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    aiExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                aiExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }));
     }
 
+    public static void processMessageAsync(String prompt, List<Message> conversationHistory, 
+                                          AIResponseCallback callback) {
+        if (prompt == null || prompt.trim().isEmpty()) {
+            LOGGER.warning("Empty prompt received, rejecting request");
+            callback.onError("Cannot process empty prompt", prompt);
+            return;
+        }
+        
+        if (!isOllamaAvailable) {
+            LOGGER.warning("Ollama marked as unavailable, rejecting request");
+            callback.onError("AI service is currently unavailable. Please try again later.", prompt);
+            return;
+        }
+
+        aiExecutor.submit(() -> {
+            try {
+                String cacheKey = buildCacheKey(prompt, conversationHistory);
+                String cachedResponse = null;
+                
+                cacheLock.lock();
+                try {
+                    cachedResponse = responseCache.get(cacheKey);
+                    if (cachedResponse != null) {
+                        LOGGER.info("Cache hit for prompt: " + prompt);
+                        callback.onResponseReceived(cachedResponse, prompt);
+                        return;
+                    }
+                } finally {
+                    cacheLock.unlock();
+                }
+                
+                LOGGER.info("Processing new async query: " + prompt);
+                String context = buildContext(prompt, conversationHistory);
+                String requestBody = buildJsonRequest(context);
+                String response = null;
+                
+                requestLock.lock();
+                try {
+                    for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                        if (attempt > 0) {
+                            LOGGER.info("Retry attempt " + attempt + " for query");
+                            try {
+                                Thread.sleep(RETRY_DELAY_MS * attempt);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                LOGGER.warning("Retry delay interrupted");
+                            }
+                        }
+                        
+                        response = sendRequest(requestBody);
+                        if (response != null) {
+                            break;
+                        }
+                    }
+                } finally {
+                    requestLock.unlock();
+                }
+                
+                if (response != null) {
+                    cacheLock.lock();
+                    try {
+                        responseCache.put(cacheKey, response);
+                        scheduleCacheCleanup(cacheKey);
+                    } finally {
+                        cacheLock.unlock();
+                    }
+                    
+                    callback.onResponseReceived(response, prompt);
+                } else {
+                    LOGGER.severe("All retry attempts failed for: " + prompt);
+                    callback.onError("Unable to get a response from the AI service after multiple attempts.", prompt);
+                }
+            } catch (Exception e) {
+                LOGGER.severe("Exception in async AI processing: " + e.getMessage());
+                e.printStackTrace();
+                callback.onError("Error processing AI request: " + e.getMessage(), prompt);
+            }
+        });
+    }
+    
     public static String performQuery(String prompt, List<Message> conversationHistory) {
         if (prompt == null || prompt.trim().isEmpty()) {
             LOGGER.warning("Empty prompt received, rejecting request");
@@ -118,15 +220,6 @@ public class AIIntegration {
                     if (aiResponse == null || aiResponse.isEmpty()) {
                         LOGGER.warning("Received empty response from Ollama");
                         return "AI returned an empty response.";
-                    }
-                    
-                    String cacheKey = buildCacheKey(requestBody, null);
-                    cacheLock.lock();
-                    try {
-                        responseCache.put(cacheKey, aiResponse);
-                        scheduleCacheCleanup(cacheKey);
-                    } finally {
-                        cacheLock.unlock();
                     }
                     
                     isOllamaAvailable = true;

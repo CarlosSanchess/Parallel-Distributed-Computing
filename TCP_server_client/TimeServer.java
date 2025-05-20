@@ -485,10 +485,12 @@ public class TimeServer {
             return;
         }
 
+        final Room finalRoom = room;
+
         try {
             while (true) {
                 outputPrints.cleanClientTerminal(writer);
-                outputPrints.viewRoom(room, writer);
+                outputPrints.viewRoom(finalRoom, writer);
                 
                 String response = checkInputWithDelay(reader, 1000);
                 
@@ -498,7 +500,7 @@ public class TimeServer {
                         try {
                             c.setRoom(-1);
                             c.setState(ClientState.NOT_IN_ROOM); 
-                            room.removeMember(c);
+                            finalRoom.removeMember(c);
                         } finally {
                             lock.unlock();
                         }
@@ -506,22 +508,53 @@ public class TimeServer {
                         break;
                     } else {
                         lock.lock();
-
-                            if(response.equals("/disconnect"))
-                            {
+                        try {
+                            if(response.equals("/disconnect")) {
                                 handleDisconnect(c, sockClient, writer);
                                 break;
                             }
 
-                                room.addMessage(new Message(c.getName(), response));
-                                //if(room.getIsAi()){
-                                    // room.addMessage(new Message("Ai Bot", AIIntegration.performQuery(response, room.getMessages())));
-                                    // TODO
-                                //}
-    
-                                System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
-
-                        lock.unlock();
+                            Message userMessage = new Message(c.getName(), response);
+                            finalRoom.addMessage(userMessage);
+                            
+                            if(finalRoom.getIsAi()) {
+                                List<Message> currentMessages = new ArrayList<>(finalRoom.getMessages());
+                                
+                                AIIntegration.processMessageAsync(
+                                    response,
+                                    currentMessages,
+                                    new AIIntegration.AIResponseCallback() {
+                                        @Override
+                                        public void onResponseReceived(String aiResponse, String originalMessage) {
+                                            lock.lock();
+                                            try {
+                                                Message aiMessage = new Message("AI Bot", aiResponse);
+                                                finalRoom.addMessage(aiMessage);
+                                                System.out.println("[INFO]: AI Bot responded in room " + roomId);
+                                            } finally {
+                                                lock.unlock();
+                                            }
+                                        }
+                                        
+                                        @Override
+                                        public void onError(String errorMessage, String originalMessage) {
+                                            System.out.println("[ERROR]: AI integration error: " + errorMessage);
+                                            
+                                            lock.lock();
+                                            try {
+                                                finalRoom.addMessage(new Message("System", "AI is temporarily unavailable"));
+                                            } finally {
+                                                 lock.unlock();
+                                            }
+                                        }
+                                    }
+                                );
+                            }
+                            
+                            System.out.println("[INFO]: " + c.getName() + " sent message in room " + roomId);
+                        } finally {
+                            lock.unlock();
+                        }
                     }
                 }
             }
