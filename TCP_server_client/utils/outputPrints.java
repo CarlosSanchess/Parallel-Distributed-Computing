@@ -30,42 +30,9 @@ public class outputPrints {
     }
     
    public static void viewRoom(Room room, PrintWriter writer) {
-    final int totalWidth = 80;        // Total width of the layout
-    final int chatWidth = 50;         // Left side: chat
-    final int membersWidth = totalWidth - chatWidth; // Right side: members
-
-    List<Message> messages = room.getMessages();  
-    List<Client> members = room.getMembers();    
-    writer.println("Room: " + room.getName());
-    writer.println("=".repeat(totalWidth));
-
-    int maxLines = Math.max(messages.size(), members.size() + 1);
-
-    for (int i = 0; i < maxLines; i++) {
-        String msg = i < messages.size() ? messages.get(i).toString() : "";
-        msg = truncateOrPad(msg, chatWidth);
-        String member;
-        if(i == 0){
-            member = "Members List:";
-        } else {
-            member = (i-1) < members.size() ? members.get(i-1).getName() : "";
-        }
-
-        member = truncateOrPad(member, membersWidth);
-        writer.println(msg + " |      " + member);
+  
+    writer.println(room.toString());
     }
-    
-    writer.println("=".repeat(totalWidth));
-    writer.println("[ Write your message below ]");
-    writer.print("> ");
-    writer.flush();
-}
 
-    private static String truncateOrPad(String str, int width) {
-        if (str.length() > width) {
-            return str.substring(0, width - 3) + "...";
-        } else {
-            return String.format("%-" + width + "s", str);
-        }
-    }
+ 
 }

@@ -84,4 +84,27 @@ public class Room {
     public int getId(){
         return this.Id;
     }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("  Room{\n");
+        sb.append("  IsAi = ").append(isAiRoom ? 1 : 0).append(",\n");
+        sb.append("  Id = ").append(Id).append(",\n");
+        sb.append("  Name = \"").append(name).append("\",\n");
+        sb.append("  MaxNumberOfMembers = ").append(maxNumberOfMembers).append(",\n");
+        sb.append("  Members = [\n");
+        for (Client member : members) {
+            sb.append("    ").append(member.getName().toString()).append(",\n");
+        }
+        sb.append("  ],\n");
+        sb.append("  Messages = [\n");
+        for (Message message : messages) {
+            sb.append("    ").append(message.toString()).append(",\n");
+        }
+        sb.append("  ]\n");
+        sb.append("}");
+        return sb.toString();
+    }
+
 }

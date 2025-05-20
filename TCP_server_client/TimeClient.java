@@ -283,70 +283,73 @@ public class TimeClient {
 
     private void appendToOutput(String text) {
         EventQueue.invokeLater(() -> {
-            if (text.contains("\u001b[H\u001b[2J") || 
-                text.contains("\u001b[2J") || 
-                text.contains("\u001b[3J") ||
-                text.contains("\u001bc")) {
-                outputArea.setText("");
-                return;
-            }            
-            if (text.trim().isEmpty()) {
-                return;
-            }
-            
-            if (text.startsWith("Login successful for user: ")) {
-                isLoggedIn = true;
-                currentUsername = text.substring("Login successful for user: ".length());
-                outputArea.append(text + "\n");
-                return;
-            }
-            
-            if (text.equals("Logged out successfully")) {
-                isLoggedIn = false;
-                currentUsername = null;
-                outputArea.append(text + "\n");
-                return;
-            }
-
-            if (text.startsWith("REGISTRATION_SUCCESS")) {
-                isLoggedIn = true;
-                currentUsername = text.substring("REGISTRATION_SUCCESS ".length());
-                shouldReconnect = true;
-                outputArea.append("Registration successful! Welcome " + currentUsername + "\n");
-                return;
-            }
-            
-            if (text.startsWith("REGISTRATION_ERROR")) {
-                shouldReconnect = false;
-                String errorMsg = text.substring("REGISTRATION_ERROR ".length());
-                outputArea.append("Registration failed: " + errorMsg + "\n");
-                return;
-            }
-            
-            if (text.startsWith("Registration successful for user: ")) {
-                isLoggedIn = true;
-                currentUsername = text.substring("Registration successful for user: ".length());
-                shouldReconnect = true;
-                outputArea.append("Registration successful! Welcome " + currentUsername + "\n");
-                return;
-            }
-            
-            if (text.equals("Username already exists") || text.equals("Username already taken")) {
-                shouldReconnect = false;
-                outputArea.append("Registration failed: Username already exists\n");
-                return;
-            }
-            
-            if (text.startsWith("Error during registration")) {
-                shouldReconnect = false;
-                outputArea.append("Registration failed: " + text.substring("Error during registration".length()) + "\n");
-                return;
-            }
+            if (text == null || text.trim().isEmpty()) return;
+            handleTextMessage(text);
             
             outputArea.append(text + "\n");
-            outputArea.setCaretPosition(outputArea.getText().length());  
+            outputArea.setCaretPosition(outputArea.getText().length());
         });
     }
+    
+    private void handleTextMessage(String text) {
+        if (text.contains("\u001b[H\u001b[2J") || 
+            text.contains("\u001b[2J") || 
+            text.contains("\u001b[3J") ||
+            text.contains("\u001bc")) {
+            outputArea.setText("");
+            return;
+        }
+    
+        if (text.startsWith("Login successful for user: ")) {
+            isLoggedIn = true;
+            currentUsername = text.substring("Login successful for user: ".length());
+            outputArea.append(text + "\n");
+            return;
+        }
+    
+        if (text.equals("Logged out successfully")) {
+            isLoggedIn = false;
+            currentUsername = null;
+            outputArea.append(text + "\n");
+            return;
+        }
+    
+        if (text.startsWith("REGISTRATION_SUCCESS")) {
+            isLoggedIn = true;
+            currentUsername = text.substring("REGISTRATION_SUCCESS ".length());
+            shouldReconnect = true;
+            outputArea.append("Registration successful! Welcome " + currentUsername + "\n");
+            return;
+        }
+    
+        if (text.startsWith("REGISTRATION_ERROR")) {
+            shouldReconnect = false;
+            String errorMsg = text.substring("REGISTRATION_ERROR ".length());
+            outputArea.append("Registration failed: " + errorMsg + "\n");
+            return;
+        }
+    
+        if (text.startsWith("Registration successful for user: ")) {
+            isLoggedIn = true;
+            currentUsername = text.substring("Registration successful for user: ".length());
+            shouldReconnect = true;
+            outputArea.append("Registration successful! Welcome " + currentUsername + "\n");
+            return;
+        }
+    
+        if (text.equals("Username already exists") || text.equals("Username already taken")) {
+            shouldReconnect = false;
+            outputArea.append("Registration failed: Username already exists\n");
+            return;
+        }
+    
+        if (text.startsWith("Error during registration")) {
+            shouldReconnect = false;
+            outputArea.append("Registration failed: " + text.substring("Error during registration".length()) + "\n");
+            return;
+        }
+    }
+    
 
     private void closeConnection() {
         try {
@@ -374,6 +377,7 @@ public class TimeClient {
                 
                 Package serverResponse;
                 while ((serverResponse = Model.Package.readInput(reader)) != null) {
+                    System.out.println(serverResponse.getMessage());
                     appendToOutput(serverResponse.getMessage());
                     if(serverResponse.getToken() != null && serverResponse.getToken().length() > 1){
                         userToken = serverResponse.getToken();
