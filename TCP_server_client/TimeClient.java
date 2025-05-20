@@ -2,7 +2,6 @@ import java.awt.*;
 import java.awt.event.*;
 import java.net.*;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.io.*;
 
 import Model.Package;
@@ -23,6 +22,14 @@ public class TimeClient {
     private String currentUsername = null;
     private String userToken = "";
     
+    private Panel roomInfoPanel;
+    private String currentRoomId = null;
+    private Label roomNameLabel;
+    private Label roomMembersLabel;
+    private List participantsList;
+    private boolean inRoom = false;
+    private ScrollPane participantsScrollPane;
+    
     private static final int MIN_WIDTH = 400;
     private static final int MIN_HEIGHT = 300;
     
@@ -32,10 +39,20 @@ public class TimeClient {
     private Font defaultFont;
     private Font headerFont;
     private Font inputFont;
+    private Font roomNameFont;
     
     private Color backgroundColor = new Color(245, 245, 245);
     private Color headerColor = new Color(230, 230, 230);
     private Color outputBackgroundColor = new Color(255, 255, 255);
+    private Color roomInfoBackgroundColor = new Color(240, 248, 255);
+    
+    // Message display colors and constants
+    private static final Color MESSAGE_HEADER_COLOR = new Color(70, 130, 180);
+    private static final Color MESSAGE_SEPARATOR_COLOR = new Color(200, 200, 200);
+    private static final Color MESSAGE_BACKGROUND_COLOR = new Color(250, 250, 250);
+    private static final Color MESSAGE_TEXT_COLOR = new Color(50, 50, 50);
+    private static final Color TIMESTAMP_COLOR = new Color(100, 100, 100);
+    private static final int SEPARATOR_PADDING = 3;
 
     public TimeClient(String hostname, int port) {
         this.hostname = hostname;
@@ -58,25 +75,26 @@ public class TimeClient {
         defaultFont = new Font(Font.SANS_SERIF, Font.PLAIN, Math.round(12 * scaleFactor));
         headerFont = new Font(Font.SANS_SERIF, Font.BOLD, Math.round(13 * scaleFactor));
         inputFont = new Font(Font.SANS_SERIF, Font.PLAIN, Math.round(13 * scaleFactor));
+        roomNameFont = new Font(Font.SANS_SERIF, Font.BOLD, Math.round(14 * scaleFactor));
     }
 
     private void initializeGUI() {
         GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
         GraphicsDevice gd = ge.getDefaultScreenDevice();
         DisplayMode displayMode = gd.getDisplayMode();
-        
+
         int screenWidth = displayMode.getWidth();
         int screenHeight = displayMode.getHeight();
-        
+
         int frameWidth = Math.max(MIN_WIDTH, Math.min(DEFAULT_WIDTH, (int)(screenWidth * 0.6)));
         int frameHeight = Math.max(MIN_HEIGHT, Math.min(DEFAULT_HEIGHT, (int)(screenHeight * 0.6)));
-        
+
         frame = new Frame("Time Client (AWT)");
         frame.setSize(frameWidth, frameHeight);
         frame.setLocationRelativeTo(null); 
         frame.setLayout(new BorderLayout(5, 5));
         frame.setBackground(backgroundColor);
-        
+
         frame.addComponentListener(new ComponentAdapter() {
             @Override
             public void componentResized(ComponentEvent e) {
@@ -88,74 +106,98 @@ public class TimeClient {
         topPanel.setBackground(headerColor);
         statusLabel = new Label("Status: Disconnected", Label.LEFT);
         statusLabel.setFont(headerFont);
-        
+
         Panel buttonPanel = new Panel(new FlowLayout(FlowLayout.RIGHT));
         buttonPanel.setBackground(headerColor);
-        
+
         connectButton = new Button("Connect");
         disconnectButton = new Button("Disconnect");
-        
+
         connectButton.setFont(defaultFont);
         disconnectButton.setFont(defaultFont);
-        
+
         connectButton.addActionListener(e -> {
             if (socket == null || socket.isClosed()) {
                 shouldReconnect = true;
                 connectToServer();
             }
         });
-        
+
         disconnectButton.addActionListener(e -> {
             disconnect();
         });
-        
+
         disconnectButton.setEnabled(false);
-        
+
         buttonPanel.add(connectButton);
         buttonPanel.add(disconnectButton);
-        
+
         topPanel.add(statusLabel, BorderLayout.WEST);
         topPanel.add(buttonPanel, BorderLayout.EAST);
-        
+
         Panel topPanelContainer = new Panel(new BorderLayout());
         topPanelContainer.add(topPanel, BorderLayout.CENTER);
         topPanelContainer.add(new Panel(), BorderLayout.NORTH);
         topPanelContainer.add(new Panel(), BorderLayout.SOUTH); 
         topPanelContainer.add(new Panel(), BorderLayout.WEST); 
         topPanelContainer.add(new Panel(), BorderLayout.EAST); 
-        
+
         frame.add(topPanelContainer, BorderLayout.NORTH);
 
-        outputArea = new TextArea();
+        initializeRoomInfoPanel();
+
+        Panel centerPanel = new Panel(new BorderLayout());
+        centerPanel.add(roomInfoPanel, BorderLayout.NORTH);
+
+        outputArea = new TextArea() {
+            @Override
+            public void paint(Graphics g) {
+                Graphics2D g2d = (Graphics2D)g;
+                g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, 
+                                    RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                super.paint(g2d);
+            }
+        };
         outputArea.setEditable(false);
         outputArea.setFont(defaultFont);
         outputArea.setBackground(outputBackgroundColor);
-        
-        Panel outputPanel = new Panel(new BorderLayout(10, 10));
+
+        Panel outputPanel = new Panel(new BorderLayout());
         outputPanel.add(outputArea, BorderLayout.CENTER);
-        outputPanel.add(new Panel(), BorderLayout.NORTH);
-        outputPanel.add(new Panel(), BorderLayout.SOUTH);
-        outputPanel.add(new Panel(), BorderLayout.WEST);  
-        outputPanel.add(new Panel(), BorderLayout.EAST); 
-        
-        frame.add(outputPanel, BorderLayout.CENTER);
+
+        Panel topPad = new Panel();
+        topPad.setPreferredSize(new Dimension(0, 10));
+        Panel bottomPad = new Panel();
+        bottomPad.setPreferredSize(new Dimension(0, 10));
+        Panel leftPad = new Panel();
+        leftPad.setPreferredSize(new Dimension(15, 0));
+        Panel rightPad = new Panel();
+        rightPad.setPreferredSize(new Dimension(15, 0));
+
+        outputPanel.add(topPad, BorderLayout.NORTH);
+        outputPanel.add(bottomPad, BorderLayout.SOUTH);
+        outputPanel.add(leftPad, BorderLayout.WEST);
+        outputPanel.add(rightPad, BorderLayout.EAST);
+
+        centerPanel.add(outputPanel, BorderLayout.CENTER);
+        frame.add(centerPanel, BorderLayout.CENTER);
 
         Panel inputPanel = new Panel(new BorderLayout(5, 0));
         inputField = new TextField();
         inputField.setFont(inputFont);
         inputField.addActionListener(this::handleInput);
-        
+
         Panel sendButtonPanel = new Panel(new FlowLayout(FlowLayout.RIGHT, 5, 0));
         Button sendButton = new Button("Send");
         Button clearButton = new Button("Clear");
         Button exitButton = new Button("Exit");
-        
+
         sendButton.setFont(defaultFont);
         clearButton.setFont(defaultFont);
         exitButton.setFont(defaultFont);
-        
+
         sendButton.addActionListener(this::handleInput);
-        
+
         clearButton.addActionListener(e -> {
             inputField.setText("");  
         });
@@ -170,21 +212,21 @@ public class TimeClient {
             frame.dispose();
             System.exit(0);
         });
-        
+
         sendButtonPanel.add(clearButton);
         sendButtonPanel.add(sendButton);
         sendButtonPanel.add(exitButton);
 
         inputPanel.add(inputField, BorderLayout.CENTER);
         inputPanel.add(sendButtonPanel, BorderLayout.EAST);
-        
+
         Panel inputPanelContainer = new Panel(new BorderLayout());
         inputPanelContainer.add(inputPanel, BorderLayout.CENTER);
         inputPanelContainer.add(new Panel(), BorderLayout.NORTH); 
         inputPanelContainer.add(new Panel(), BorderLayout.SOUTH);
         inputPanelContainer.add(new Panel(), BorderLayout.WEST);  
         inputPanelContainer.add(new Panel(), BorderLayout.EAST);  
-        
+
         frame.add(inputPanelContainer, BorderLayout.SOUTH);
 
         KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher(e -> {
@@ -217,7 +259,7 @@ public class TimeClient {
         commands.addActionListener(e -> {
             showHelpDialog();
         });
-        
+
         MenuItem exitItem = new MenuItem("Exit");
         exitItem.addActionListener(e -> {
             shouldReconnect = false;
@@ -225,7 +267,7 @@ public class TimeClient {
             frame.dispose();
             System.exit(0);
         });
-        
+
         helpMenu.add(commands);
         helpMenu.addSeparator();
         helpMenu.add(exitItem);
@@ -233,12 +275,62 @@ public class TimeClient {
         frame.setMenuBar(menuBar);
 
         frame.setVisible(true);
-        
+
         inputField.requestFocus();
-        
+
+        roomInfoPanel.setVisible(false);
+
         appendToOutput("Welcome to Time Client!");
         appendToOutput("Connecting to server at " + hostname + ":" + port + "...");
         appendToOutput("Type /help to see available commands");
+    }
+
+    
+    private void initializeRoomInfoPanel() {
+        roomInfoPanel = new Panel(new BorderLayout());
+        roomInfoPanel.setBackground(roomInfoBackgroundColor);
+        
+        Panel roomHeaderPanel = new Panel(new BorderLayout());
+        roomHeaderPanel.setBackground(roomInfoBackgroundColor);
+        
+        roomNameLabel = new Label("No Room Selected", Label.LEFT);
+        roomNameLabel.setFont(roomNameFont);
+        
+        roomMembersLabel = new Label("Members: 0/0", Label.RIGHT);
+        roomMembersLabel.setFont(defaultFont);
+        
+        roomHeaderPanel.add(roomNameLabel, BorderLayout.WEST);
+        roomHeaderPanel.add(roomMembersLabel, BorderLayout.EAST);
+        
+        Panel participantsPanel = new Panel(new BorderLayout());
+        participantsPanel.setBackground(roomInfoBackgroundColor);
+        
+        Label participantsHeaderLabel = new Label("Participants:", Label.LEFT);
+        participantsHeaderLabel.setFont(defaultFont);
+        
+        participantsList = new List(5, false); 
+        participantsList.setFont(defaultFont);
+        participantsList.setBackground(Color.WHITE);
+        
+        participantsScrollPane = new ScrollPane(ScrollPane.SCROLLBARS_AS_NEEDED); 
+        participantsScrollPane.add(participantsList);
+        
+        ScrollPane scrollPane = new ScrollPane(ScrollPane.SCROLLBARS_AS_NEEDED);
+        scrollPane.add(participantsList);
+        
+        participantsPanel.add(participantsHeaderLabel, BorderLayout.NORTH);
+        participantsPanel.add(scrollPane, BorderLayout.CENTER); 
+        
+        Panel mainContent = new Panel(new BorderLayout(10, 5));
+        mainContent.setBackground(roomInfoBackgroundColor);
+        mainContent.add(roomHeaderPanel, BorderLayout.NORTH);
+        mainContent.add(participantsPanel, BorderLayout.CENTER);
+        
+        roomInfoPanel.add(new Panel(), BorderLayout.NORTH);
+        roomInfoPanel.add(new Panel(), BorderLayout.WEST);
+        roomInfoPanel.add(new Panel(), BorderLayout.EAST);
+        roomInfoPanel.add(new Panel(), BorderLayout.SOUTH);
+        roomInfoPanel.add(mainContent, BorderLayout.CENTER);
     }
     
     private void handleResize() {
@@ -257,6 +349,8 @@ public class TimeClient {
         if (needsResize) {
             frame.setSize(size);
         }
+        
+        outputArea.repaint();
     }
     
     private void showHelpDialog() {
@@ -393,6 +487,10 @@ public class TimeClient {
                 case "/help":
                     showHelpDialog();
                     return;
+                
+                case "/leave":
+                    leaveRoom();
+                    break;
             }
         }
         
@@ -413,14 +511,92 @@ public class TimeClient {
             }
             
             if (text.startsWith("Room{")) {
-                String roomInfo = parseAndFormatRoom(text);
-                outputArea.append(roomInfo + "\n");
+                updateRoomInfoPanel(text);
+                
+                String messagesSection = extractField(text, "Messages = [", "]");
+                if (!messagesSection.isEmpty()) {
+                    String[] messages = processArrayContent(messagesSection);
+                    if (messages.length > 0) {
+                        displayRecentMessages(messages);
+                    }
+                }
+                
             } else {
-                outputArea.append(text + "\n");
+                displayMessage(text, false);
             }
             
             outputArea.setCaretPosition(outputArea.getText().length());
         });
+    }
+    
+    private String createSeparator(String text) {
+        FontMetrics metrics = outputArea.getFontMetrics(outputArea.getFont());
+
+        int estimatedPadding = 10; 
+        int availableWidth = outputArea.getWidth() - (estimatedPadding * 2) - (SEPARATOR_PADDING * 2);
+
+        int dashWidth = metrics.stringWidth("-");
+        int maxDashes = dashWidth > 0 ? availableWidth / dashWidth : 30;
+
+        if (text != null && !text.isEmpty()) {
+            int textWidth = metrics.stringWidth(text);
+            int dashesEachSide = Math.max(3, (maxDashes - (textWidth / dashWidth)) / 2);
+            return "\n" + 
+                repeatChar('-', dashesEachSide) + " " + text + " " + 
+                repeatChar('-', dashesEachSide) + "\n\n";
+        } else {
+            return "\n" + repeatChar('-', maxDashes) + "\n\n";
+        }
+    }
+
+
+    private String repeatChar(char c, int count) {
+        return new String(new char[count]).replace('\0', c);
+    }
+
+    private void displayRecentMessages(String[] messages) {
+        String separator = createSeparator("Recent Messages");
+        outputArea.append(separator);
+        
+        for (String message : messages) {
+            if (!message.trim().isEmpty()) {
+                displayMessage(message.trim(), true);
+            }
+        }
+        
+        outputArea.append(createSeparator(null));
+    }
+
+    private void displayMessage(String message, boolean isHistory) {
+        Font messageFont = new Font(defaultFont.getName(), Font.PLAIN, defaultFont.getSize());
+        Font timestampFont = new Font(defaultFont.getName(), Font.ITALIC, defaultFont.getSize() - 1);
+        
+        if (message.matches("^\\[\\d{2}:\\d{2}:\\d{2}\\].*")) {
+            int timestampEnd = message.indexOf("]") + 1;
+            String timestamp = message.substring(0, timestampEnd);
+            String messageContent = message.substring(timestampEnd).trim();
+            
+            outputArea.setFont(timestampFont);
+            outputArea.setForeground(TIMESTAMP_COLOR);
+            outputArea.append(timestamp + " ");
+            
+            outputArea.setFont(messageFont);
+            outputArea.setForeground(MESSAGE_TEXT_COLOR);
+            outputArea.append(messageContent);
+        } else {
+            outputArea.setFont(messageFont);
+            outputArea.setForeground(MESSAGE_TEXT_COLOR);
+            outputArea.append(message);
+        }
+        
+        outputArea.append("\n");
+        
+        if (isHistory) {
+            outputArea.append("\n");
+        }
+        
+        outputArea.setFont(defaultFont);
+        outputArea.setForeground(Color.BLACK);
     }
     
     private boolean handleTextMessage(String text) {
@@ -442,6 +618,7 @@ public class TimeClient {
         if (text.equals("Logged out successfully")) {
             isLoggedIn = false;
             currentUsername = null;
+            leaveRoom();
             outputArea.append(text + "\n");
             return true;
         }
@@ -480,10 +657,17 @@ public class TimeClient {
             outputArea.append("Registration failed: " + text.substring("Error during registration".length()) + "\n");
             return true;
         }
+        
+        if (text.contains("You left the room") || text.contains("You have left the room")) {
+            leaveRoom();
+            outputArea.append(text + "\n");
+            return true;
+        }
+        
         return false;
     }
     
-    private String parseAndFormatRoom(String roomText) {
+    private void updateRoomInfoPanel(String roomText) {
         try {
             String roomName = extractField(roomText, "Name = \"", "\"");
             String maxMembers = extractField(roomText, "MaxNumberOfMembers = ", ",");
@@ -491,98 +675,125 @@ public class TimeClient {
             String roomId = extractField(roomText, "Id = ", ",");
             
             String membersSection = extractField(roomText, "Members = [", "]");
-            String[] members = membersSection.isEmpty() ? new String[0] : membersSection.split(", ");
-            
-            String messagesSection = extractField(roomText, "Messages = [", "]");
-            String[] messages = messagesSection.isEmpty() ? new String[0] : messagesSection.split(", ");
-            
-            int outputWidth = outputArea.getSize().width;
-            int charsPerLine = Math.max(60, outputWidth / 7);
-            
-            StringBuilder sb = new StringBuilder();
+            String[] members = processArrayContent(membersSection);
             
             String aiTag = isAi.equals("1") ? " [AI]" : "";
-            sb.append(roomName).append(aiTag).append("\n");
-            sb.append("Room ID: ").append(roomId).append(" | Members: ").append(members.length)
-              .append("/").append(maxMembers).append("\n");
+            roomNameLabel.setText(roomName + aiTag);
+            roomMembersLabel.setText("Members: " + members.length + "/" + maxMembers);
             
-            sb.append(createLine('-', charsPerLine)).append("\n");
-            
-            sb.append("PARTICIPANTS:\n");
-            if (members.length > 0) {
-                for (String member : members) {
-                    sb.append("• ").append(member.trim()).append("\n");
-                }
-            } else {
-                sb.append("(no participants)\n");
+            int maxMembersInt;
+            try {
+                maxMembersInt = Integer.parseInt(maxMembers);
+            } catch (NumberFormatException e) {
+                maxMembersInt = 5; 
             }
             
-            sb.append(createLine('-', charsPerLine)).append("\n");
+            int itemHeight = participantsList.getFontMetrics(participantsList.getFont()).getHeight() + 4;
+            int minHeight = 5 * itemHeight;  
+            int maxHeight = 15 * itemHeight; 
+            int preferredHeight = Math.min(maxHeight, Math.max(minHeight, maxMembersInt * itemHeight));
             
-            sb.append("RECENT MESSAGES:\n");
-            if (messages.length > 0) {
-                int start = Math.max(0, messages.length - 5);
-                for (int i = start; i < messages.length; i++) {
-                    String messageText = messages[i].trim();
-                    wrapMessage(sb, messageText, charsPerLine);
-                }
-            } else {
-                sb.append("(no messages)\n");
+            participantsList.removeAll();
+            for (String member : members) {
+                participantsList.add(member);
             }
             
-            sb.append(createLine('-', charsPerLine));
-            return sb.toString();
+            Dimension currentSize = participantsScrollPane.getSize();
+            participantsScrollPane.setPreferredSize(
+                new Dimension(currentSize.width, preferredHeight)
+            );
+            
+            inRoom = true;
+            currentRoomId = roomId;
+            roomInfoPanel.setVisible(true);
+            
+            roomInfoPanel.validate();
+            frame.validate();
+            
         } catch (Exception e) {
-            return "Failed to parse room info: " + e.getMessage();
+            appendToOutput("Failed to update room info: " + e.getMessage());
+            e.printStackTrace();
         }
     }
-
-    private void wrapMessage(StringBuilder sb, String message, int maxWidth) {
-        String[] words = message.split("\\s+");
-        StringBuilder line = new StringBuilder();
-        boolean isFirstLine = true;
-        
-        for (String word : words) {
-            if ((line.length() + word.length() + 1) > maxWidth && line.length() > 0) {
-                if (isFirstLine) {
-                    sb.append("• ").append(line.toString().trim()).append("\n");
-                    isFirstLine = false;
-                } else {
-                    sb.append("  ").append(line.toString().trim()).append("\n");
-                }
-                line = new StringBuilder();
-            }
-            
-            if (line.length() > 0) {
-                line.append(" ");
-            }
-            line.append(word);
-        }
-        
-        if (line.length() > 0) {
-            if (isFirstLine) {
-                sb.append("• ").append(line.toString().trim()).append("\n");
-            } else {
-                sb.append("  ").append(line.toString().trim()).append("\n");
-            }
-        }
-    }
-
-    private String createLine(char c, int length) {
-        StringBuilder line = new StringBuilder();
-        for (int i = 0; i < length; i++) {
-            line.append(c);
-        }
-        return line.toString();
+    
+    private void leaveRoom() {
+        EventQueue.invokeLater(() -> {
+            inRoom = false;
+            currentRoomId = null;
+            roomInfoPanel.setVisible(false);
+            frame.validate();
+        });
     }
 
     private String extractField(String text, String startDelim, String endDelim) {
         try {
-            int start = text.indexOf(startDelim) + startDelim.length();
-            int end = text.indexOf(endDelim, start);
+            int start = text.indexOf(startDelim);
+            if (start == -1) return "";
+            
+            start += startDelim.length();
+            
+            int end;
+            if (startDelim.equals("Messages = [") || startDelim.equals("Members = [")) {
+                end = findMatchingClosingBracket(text, start);
+            } else {
+                end = text.indexOf(endDelim, start);
+            }
+            
+            if (end == -1) return "";
             return text.substring(start, end).trim();
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    private String[] processArrayContent(String arrayContent) {
+        if (arrayContent == null || arrayContent.isEmpty()) {
+            return new String[0];
+        }
+        
+        if (arrayContent.endsWith(",")) {
+            arrayContent = arrayContent.substring(0, arrayContent.length() - 1);
+        }
+        
+        String[] items = arrayContent.split(", ");
+        
+        ArrayList<String> filteredItems = new ArrayList<>();
+        for (String item : items) {
+            if (item != null && !item.trim().isEmpty()) {
+                filteredItems.add(item.trim());
+            }
+        }
+        
+        return filteredItems.toArray(new String[0]);
+    }
+
+    private int findMatchingClosingBracket(String text, int startPos) {
+        int depth = 0;
+        boolean inQuotes = false;
+        
+        for (int i = startPos; i < text.length(); i++) {
+            char c = text.charAt(i);
+            
+            if (c == '\"') {
+                inQuotes = !inQuotes;
+            } else if (!inQuotes) {
+                if (c == '[') {
+                    depth++;
+                } else if (c == ']') {
+                    if (depth == 0) {
+                        return i;
+                    }
+                    depth--;
+                }
+            }
+        }
+        
+        return -1;
+    }
+
+    public void addMessage(String message) {
+        if (message != null && !message.trim().isEmpty()) {
+            appendToOutput(message);
         }
     }
 
@@ -627,6 +838,7 @@ public class TimeClient {
                     disconnectButton.setEnabled(false);
                     isLoggedIn = false;
                     currentUsername = null;
+                    leaveRoom(); 
                 });
                 
                 if (shouldReconnect) {
@@ -641,6 +853,7 @@ public class TimeClient {
                     disconnectButton.setEnabled(false);
                     isLoggedIn = false;
                     currentUsername = null;
+                    leaveRoom(); 
                 });
                 
                 if (shouldReconnect) {
@@ -666,6 +879,7 @@ public class TimeClient {
         disconnectButton.setEnabled(false);
         isLoggedIn = false;
         currentUsername = null;
+        leaveRoom(); 
     }
 
     public static void main(String[] args) {
@@ -715,8 +929,17 @@ public class TimeClient {
             portPanel.add(portLabel, BorderLayout.WEST);
             portPanel.add(portField, BorderLayout.CENTER);
             
-            dialogFrame.add(hostPanel);
-            dialogFrame.add(portPanel);
+            Panel advancedPanel = new Panel(new FlowLayout(FlowLayout.LEFT));
+            Checkbox showRoomInfoCheckbox = new Checkbox("Show Room Information Panel", true);
+            showRoomInfoCheckbox.setFont(dialogFont);
+            advancedPanel.add(showRoomInfoCheckbox);
+            
+            Panel mainContent = new Panel(new GridLayout(3, 1, 10, 10));
+            mainContent.add(hostPanel);
+            mainContent.add(portPanel);
+            mainContent.add(advancedPanel);
+            
+            dialogFrame.add(mainContent);
             
             Button okButton = new Button("Connect");
             Button cancelButton = new Button("Cancel");
@@ -727,14 +950,23 @@ public class TimeClient {
             buttonPanel.add(okButton);
             buttonPanel.add(cancelButton);
             
-            dialogFrame.add(buttonPanel);
+            dialogFrame.add(buttonPanel, BorderLayout.SOUTH);
             
             okButton.addActionListener(e -> {
                 try {
                     String inputHostname = hostnameField.getText();
                     int inputPort = Integer.parseInt(portField.getText());
+                    
                     dialogFrame.dispose();
-                    EventQueue.invokeLater(() -> new TimeClient(inputHostname, inputPort));
+                    
+                    EventQueue.invokeLater(() -> {
+                        TimeClient client = new TimeClient(inputHostname, inputPort);
+                        if (client.roomInfoPanel != null) {
+                            if (!client.inRoom) {
+                                client.roomInfoPanel.setVisible(false);
+                            }
+                        }
+                    });
                 } catch (NumberFormatException ex) {
                     Dialog errorDialog = new Dialog(dialogFrame, "Error", true);
                     errorDialog.setLayout(new BorderLayout(10, 10));
@@ -770,6 +1002,7 @@ public class TimeClient {
                 }
             });
             
+            dialogFrame.pack();
             dialogFrame.setLocationRelativeTo(null);
             dialogFrame.setVisible(true);
         }
