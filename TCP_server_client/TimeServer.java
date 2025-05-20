@@ -699,9 +699,7 @@ public class TimeServer {
     }
     private Model.Package readInput(BufferedReader reader){
         Model.Package p = Model.Package.readInput(reader);
-        // if(p.getMessage().equals("/disconnect")){
-        //     handleDisconnect(null, null, null);
-        // }
+    
          return p;
     }
 

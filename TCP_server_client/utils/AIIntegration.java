@@ -3,6 +3,7 @@ package utils;
 import java.io.*;
 import java.net.*;
 import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
 import java.util.logging.*;
 import Model.Message;
@@ -20,6 +21,20 @@ public class AIIntegration {
     private static final int MAX_RETRIES = 2;
     private static final int RETRY_DELAY_MS = 1000;
     
+    private static final ExecutorService aiExecutor = 
+        Executors.newFixedThreadPool(5); 
+    
+    private static final ScheduledExecutorService pollingExecutor = 
+        Executors.newSingleThreadScheduledExecutor();
+    private static final int POLLING_INTERVAL_SECONDS = 5;
+    private static volatile boolean isPollingActive = false;
+    private static ScheduledFuture<?> pollingTask = null;
+    
+    public interface AIResponseCallback {
+        void onResponseReceived(String response, String originalMessage);
+        void onError(String errorMessage, String originalMessage);
+    }
+    
     private static final Logger LOGGER = Logger.getLogger(AIIntegration.class.getName());
     
     static {
@@ -31,8 +46,108 @@ public class AIIntegration {
         } catch (IOException e) {
             System.err.println("Failed to initialize logger: " + e.getMessage());
         }
+        
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            LOGGER.info("Shutting down AI executor service");
+            aiExecutor.shutdown();
+            pollingExecutor.shutdown();
+            try {
+                if (!aiExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    aiExecutor.shutdownNow();
+                }
+                if (!pollingExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                    pollingExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                aiExecutor.shutdownNow();
+                pollingExecutor.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }));
     }
 
+    public static void processMessageAsync(String prompt, List<Message> conversationHistory, 
+                                          AIResponseCallback callback) {
+        if (prompt == null || prompt.trim().isEmpty()) {
+            LOGGER.warning("Empty prompt received, rejecting request");
+            callback.onError("Cannot process empty prompt", prompt);
+            return;
+        }
+        
+        if (!isOllamaAvailable) {
+            LOGGER.warning("Ollama marked as unavailable, rejecting request");
+            startPollingIfNotActive(); 
+            callback.onError("AI service is currently unavailable. Please try again later.", prompt);
+            return;
+        }
+
+        aiExecutor.submit(() -> {
+            try {
+                String cacheKey = buildCacheKey(prompt, conversationHistory);
+                String cachedResponse = null;
+                
+                cacheLock.lock();
+                try {
+                    cachedResponse = responseCache.get(cacheKey);
+                    if (cachedResponse != null) {
+                        LOGGER.info("Cache hit for prompt: " + prompt);
+                        callback.onResponseReceived(cachedResponse, prompt);
+                        return;
+                    }
+                } finally {
+                    cacheLock.unlock();
+                }
+                
+                LOGGER.info("Processing new async query: " + prompt);
+                String context = buildContext(prompt, conversationHistory);
+                String requestBody = buildJsonRequest(context);
+                String response = null;
+                
+                requestLock.lock();
+                try {
+                    for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+                        if (attempt > 0) {
+                            LOGGER.info("Retry attempt " + attempt + " for query");
+                            try {
+                                Thread.sleep(RETRY_DELAY_MS * attempt);
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                LOGGER.warning("Retry delay interrupted");
+                            }
+                        }
+                        
+                        response = sendRequest(requestBody);
+                        if (response != null) {
+                            break;
+                        }
+                    }
+                } finally {
+                    requestLock.unlock();
+                }
+                
+                if (response != null) {
+                    cacheLock.lock();
+                    try {
+                        responseCache.put(cacheKey, response);
+                        scheduleCacheCleanup(cacheKey);
+                    } finally {
+                        cacheLock.unlock();
+                    }
+                    
+                    callback.onResponseReceived(response, prompt);
+                } else {
+                    LOGGER.severe("All retry attempts failed for: " + prompt);
+                    startPollingIfNotActive(); 
+                    callback.onError("Unable to get a response from the AI service after multiple attempts.", prompt);
+                }
+            } catch (Exception e) {
+                LOGGER.severe("Exception in async AI processing: " + e.getMessage());
+                e.printStackTrace();
+                callback.onError("Error processing AI request: " + e.getMessage(), prompt);
+            }
+        });
+    }
+    
     public static String performQuery(String prompt, List<Message> conversationHistory) {
         if (prompt == null || prompt.trim().isEmpty()) {
             LOGGER.warning("Empty prompt received, rejecting request");
@@ -41,6 +156,7 @@ public class AIIntegration {
         
         if (!isOllamaAvailable) {
             LOGGER.warning("Ollama marked as unavailable, rejecting request");
+            startPollingIfNotActive(); 
             return "AI service is currently unavailable. Please try again later.";
         }
 
@@ -82,6 +198,7 @@ public class AIIntegration {
             }
             
             LOGGER.severe("All retry attempts failed");
+            startPollingIfNotActive();
             return "Unable to get a response from the AI service after multiple attempts.";
         } finally {
             requestLock.unlock();
@@ -120,16 +237,8 @@ public class AIIntegration {
                         return "AI returned an empty response.";
                     }
                     
-                    String cacheKey = buildCacheKey(requestBody, null);
-                    cacheLock.lock();
-                    try {
-                        responseCache.put(cacheKey, aiResponse);
-                        scheduleCacheCleanup(cacheKey);
-                    } finally {
-                        cacheLock.unlock();
-                    }
-                    
                     isOllamaAvailable = true;
+                    stopPollingIfActive();
                     LOGGER.info("Successfully received AI response of length: " + aiResponse.length());
                     return aiResponse;
                 }
@@ -140,16 +249,42 @@ public class AIIntegration {
             }
         } catch (ConnectException | SocketTimeoutException e) {
             isOllamaAvailable = false;
+            startPollingIfNotActive(); 
             LOGGER.severe("Connection error: " + e.getMessage());
             return null;
         } catch (IOException e) {
             isOllamaAvailable = false;
+            startPollingIfNotActive(); 
             LOGGER.severe("I/O error: " + e.getMessage());
             return null;
         } finally {
             if (connection != null) {
                 connection.disconnect();
             }
+        }
+    }
+
+    private static synchronized void startPollingIfNotActive() {
+        if (!isPollingActive) {
+            LOGGER.info("Starting Ollama availability polling");
+            isPollingActive = true;
+            pollingTask = pollingExecutor.scheduleAtFixedRate(() -> {
+                LOGGER.fine("Polling Ollama availability...");
+                boolean available = pingOllama();
+                if (available) {
+                    LOGGER.info("Ollama is now available");
+                    stopPollingIfActive();
+                }
+            }, 0, POLLING_INTERVAL_SECONDS, TimeUnit.SECONDS);
+        }
+    }
+    
+    private static synchronized void stopPollingIfActive() {
+        if (isPollingActive && pollingTask != null) {
+            LOGGER.info("Stopping Ollama availability polling");
+            pollingTask.cancel(false);
+            isPollingActive = false;
+            pollingTask = null;
         }
     }
 
@@ -163,8 +298,13 @@ public class AIIntegration {
     }
 
     private static void handleErrorResponse(int responseCode) {
+        boolean wasAvailable = isOllamaAvailable;
         isOllamaAvailable = (responseCode != HttpURLConnection.HTTP_NOT_FOUND && 
                             responseCode != HttpURLConnection.HTTP_UNAVAILABLE);
+                            
+        if (!isOllamaAvailable && wasAvailable) {
+            startPollingIfNotActive();
+        }
                             
         if (responseCode >= 500) {
             LOGGER.severe("Server error from Ollama API: " + responseCode);
@@ -323,8 +463,15 @@ public class AIIntegration {
     }
     
     public static void setOllamaAvailability(boolean available) {
+        boolean wasAvailable = isOllamaAvailable;
         isOllamaAvailable = available;
         LOGGER.info("Ollama availability set to: " + available);
+        
+        if (!isOllamaAvailable && wasAvailable) {
+            startPollingIfNotActive();
+        } else if (isOllamaAvailable && !wasAvailable) {
+            stopPollingIfActive();
+        }
     }
     
     public static boolean pingOllama() {
@@ -340,12 +487,29 @@ public class AIIntegration {
             int responseCode = connection.getResponseCode();
             boolean available = (responseCode == HttpURLConnection.HTTP_OK);
             
+            boolean wasAvailable = isOllamaAvailable;
             isOllamaAvailable = available;
+            
+            if (available && !wasAvailable) {
+                LOGGER.info("Ollama is now available");
+                stopPollingIfActive();
+            } else if (!available && wasAvailable) {
+                LOGGER.warning("Ollama is now unavailable");
+                startPollingIfNotActive();
+            }
+            
             LOGGER.info("Ollama ping result: " + available + " (response code: " + responseCode + ")");
             
             return available;
         } catch (Exception e) {
+            boolean wasAvailable = isOllamaAvailable;
             isOllamaAvailable = false;
+            
+            if (wasAvailable) {
+                LOGGER.warning("Ollama is now unavailable");
+                startPollingIfNotActive();
+            }
+            
             LOGGER.warning("Ollama ping failed: " + e.getMessage());
             return false;
         } finally {
@@ -373,5 +537,9 @@ public class AIIntegration {
         } finally {
             cacheLock.unlock();
         }
+    }
+    
+    public static boolean isPollingActive() {
+        return isPollingActive;
     }
 }
