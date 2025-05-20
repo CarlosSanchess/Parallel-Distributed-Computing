@@ -88,23 +88,21 @@ public class Room {
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        sb.append("  Room{\n");
-        sb.append("  IsAi = ").append(isAiRoom ? 1 : 0).append(",\n");
-        sb.append("  Id = ").append(Id).append(",\n");
-        sb.append("  Name = \"").append(name).append("\",\n");
-        sb.append("  MaxNumberOfMembers = ").append(maxNumberOfMembers).append(",\n");
-        sb.append("  Members = [\n");
+        sb.append("Room{");
+        sb.append("IsAi = ").append(isAiRoom ? 1 : 0).append(", ");
+        sb.append("Id = ").append(Id).append(", ");
+        sb.append("Name = \"").append(name).append("\", ");
+        sb.append("MaxNumberOfMembers = ").append(maxNumberOfMembers).append(", ");
+        sb.append("Members = [");
         for (Client member : members) {
-            sb.append("    ").append(member.getName().toString()).append(",\n");
+            sb.append(member.getName().toString()).append(", ");
         }
-        sb.append("  ],\n");
-        sb.append("  Messages = [\n");
+        sb.append("], ");
+        sb.append("Messages = [");
         for (Message message : messages) {
-            sb.append("    ").append(message.toString()).append(",\n");
+            sb.append(message.toString()).append(", ");
         }
-        sb.append("  ]\n");
-        sb.append("}");
+        sb.append("]}");
         return sb.toString();
     }
-
 }

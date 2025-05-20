@@ -208,7 +208,8 @@ public class AIIntegration {
     private static String sendRequest(String requestBody) {
         HttpURLConnection connection = null;
         try {
-            URL url = new URL(OLLAMA_URL);
+            URI uri = URI.create(OLLAMA_URL);
+            URL url = uri.toURL();
             connection = (HttpURLConnection) url.openConnection();
             
             connection.setRequestMethod("POST");

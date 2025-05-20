@@ -8,7 +8,7 @@ import Model.Message;
 import Model.Room;
 
 public class outputPrints {
-    private static String cleanTerminal = "\033[H\033[2J";
+    private static String cleanTerminal = "\033[H\033[2J\n";
 
     public static void cleanClientTerminal(PrintWriter clientWriter){
         clientWriter.write(cleanTerminal);
