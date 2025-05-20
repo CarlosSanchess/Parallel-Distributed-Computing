@@ -138,17 +138,15 @@ public class TimeServer {
 
         String password = getPassword(reader, writer);
         if (password == null) return null;
-
-        lock.lock();
-        try {
+            lock.lock();
+            Client c;
             if (choice.getMessage().equals("1")) {
-                return handleRegistration(sockClient, username, password, writer);
+                c = handleRegistration(sockClient, username, password, writer);
             } else {
-                return handleLogin(sockClient, username, password, writer);
+                c =  handleLogin(sockClient, username, password, writer);
             }
-        } finally {
             lock.unlock();
-        }
+            return c;
     }
 
     private Model.Package getValidChoice(BufferedReader reader, PrintWriter writer) throws IOException {
@@ -219,6 +217,7 @@ public class TimeServer {
 
             writer.println(p.serialize());
             System.out.println("[INFO] User " + username + " successfully registered.");
+
             return c;
         } catch (Exception e) {
             writer.println("Error during registration.");
@@ -227,8 +226,7 @@ public class TimeServer {
     }
 
     private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer) {
-        try {
-            System.out.println("Entrou no login ");
+        try {  
             Map<String, String[]> credentials = readCredentials();
             if (!credentials.containsKey(username)) {
                 writer.println("Username not found");
@@ -264,7 +262,6 @@ public class TimeServer {
                 writer.println(p.serialize());
 
                 System.out.println("[INFO] User " + username + " successfully logged in.");
-
                 return c;
             } else {
                 System.out.println("Invalid Password");
@@ -505,13 +502,13 @@ public class TimeServer {
                         writer.println("You have left the room.");
                         break;
                     } else {
-                        lock.lock();
 
                             if(response.equals("/disconnect"))
                             {
                                 handleDisconnect(c, sockClient, writer);
                                 break;
                             }
+                        lock.lock();
 
                                 room.addMessage(new Message(c.getName(), response));
                                 //if(room.getIsAi()){
@@ -655,6 +652,7 @@ public class TimeServer {
     }
     private void handleDisconnect(Client c, Socket sockClient, PrintWriter writer) {
         try {
+            lock.lock();
             if (c.getState() == ClientState.IN_ROOM) {
                     for (Room room : rooms) {
                         if (room.getId() == c.getRoomId()) {
@@ -675,10 +673,12 @@ public class TimeServer {
             
         } catch (IOException e) {
             System.err.println("[ERROR] Error disconnecting client " + c.getName() + ": " + e.getMessage());
+            lock.unlock();
         } finally {
             if (clients.contains(c)) {
                 clients.remove(c);
             }
+            lock.unlock();
         }
     }
     private Model.Package readInput(BufferedReader reader){
