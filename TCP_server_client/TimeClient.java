@@ -525,7 +525,6 @@ public class TimeClient {
                 displayMessage(text, false);
             }
             
-            outputArea.setCaretPosition(outputArea.getText().length());
         });
     }
     
