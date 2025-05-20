@@ -81,6 +81,10 @@ public class TimeClient {
 
         exitButton.addActionListener(e -> {
             shouldReconnect = false;
+            if (writer != null) {
+                Package p = new Package("/exit", userToken);
+                writer.println(p.serialize());
+            }
             closeConnection();
             frame.dispose();
             System.exit(0);

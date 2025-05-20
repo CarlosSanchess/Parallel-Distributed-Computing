@@ -396,30 +396,11 @@ public class TimeServer {
 
             writer.println("To join a room, type: /join <room number> or /create to create a room.");
             String input = readLineForFlags(reader, writer);
-            if(input.equals("/quit")){
-
-            }
-            if(input.equals("/logout")){
-                lock.lock();
-                c.setState(ClientState.LOGGED_OUT);
-                clients.remove(c); 
-                utils.removeToken(String.valueOf(c.getId()), c.getName());
-                lock.unlock();
+           
+            if (handleMainHubCommand(input, c, reader, writer, sockClient)) {
                 return;
             }
-            if(input.equals("/create")){
-                handleRoomCreation(reader, writer, c);  
-                continue;
-            }
 
-            if (!input.startsWith("/join")) {
-                writer.println("Invalid command. Use: /join <room number> or /create to create a room");
-                continue;
-            }
-            if(input.equals("/disconnect")) {
-               handleDisconnect(c, sockClient, writer);
-               return;
-            }
             String[] parts = input.split("\\s+");
             if (parts.length < 2) {
                 writer.println("Missing room number. Usage: /join <room number>");
@@ -447,7 +428,6 @@ public class TimeServer {
                         continue;
                     }
                     
-                    // selectedRoom.addMember(c); // TODO: actually add the client
                     selectedRoom.addMember(c);
                     c.setRoom(selectedRoom.getId());
 
@@ -460,7 +440,43 @@ public class TimeServer {
             break;
         }
     }
-
+    private boolean handleMainHubCommand(String input, Client c, BufferedReader reader, PrintWriter writer, Socket sockClient) throws IOException {
+        switch (input) {
+            case "/quit", "/exit":
+                    lock.lock();
+                    try{
+                        c.setRoom(-1); // To make sure
+                        clients.remove(c);
+                    } finally{
+                        lock.unlock();
+                    }
+            return true; 
+    
+            case "/logout":
+                lock.lock();
+                try {
+                    c.setState(ClientState.LOGGED_OUT);
+                    clients.remove(c);
+                    utils.removeToken(String.valueOf(c.getId()), c.getName());
+                } finally {
+                    lock.unlock();
+                }
+                return true; 
+    
+            case "/create":
+                handleRoomCreation(reader, writer, c);
+                return false; 
+    
+            case "/disconnect":
+                handleDisconnect(c, sockClient, writer);
+                return true; 
+    
+            default:
+                writer.println("Invalid command. Use: /join <room number> or /create to create a room.");
+                return false; 
+        }
+    }
+    
     private void showRoom(Client c, Socket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
         Room room = null;
         lock.lock();
@@ -490,7 +506,7 @@ public class TimeServer {
                 String response = checkInputWithDelay(reader, 1000);
                 
                 if (response != null) {
-                    if (response.equals("/quit")) {
+                    if (response.equals("/quit") || response.equals("/exit")) {
                         lock.lock();
                         try {
                             c.setRoom(-1);
