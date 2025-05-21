@@ -72,7 +72,8 @@ public class TimeServer {
         try {
             serverSocket = new ServerSocket(this.port);
             System.out.println("Server is listening on port " + this.port);
-
+              // Start token cleanup scheduler in a virtual thread
+           
             while (isRunning) {
                 Socket socket = serverSocket.accept();
                 virtualThreadExecutor.submit(() -> handleRequest(socket));
@@ -257,9 +258,13 @@ public class TimeServer {
             String storedHash = creds[3];
             String inputHash = shaHash.toHexString(shaHash.getSHA(password));
             
+            String token = UUID.randomUUID().toString();
+
             if (storedHash.equals(inputHash)) {
+
                 for (Client c : clients) {
                     if (c.getName().equals(username)) {
+                        utils.updateOrCreateEntry(token,creds[0], username);
                         writer.println("User already logged in");
                         return c;
                     }
@@ -276,7 +281,6 @@ public class TimeServer {
                 );
                 clients.add(c);
 
-                String token = UUID.randomUUID().toString();
                 utils.updateOrCreateEntry(token,creds[0], username);
                 Model.Package p = new Package("Login successful. Welcome back " + username, token);
                 writer.println(p.serialize());
@@ -305,9 +309,8 @@ public class TimeServer {
                 String name = tokenData[1];
                 String timestamp = tokenData[2];  
                 
-                // Check if token is expired (example: 24 hour validity)
-                long currentTime = System.currentTimeMillis();
-                if (false) { // TODO
+                long currentTime = System.currentTimeMillis() / 1000L;
+                if (currentTime > Long.parseLong(timestamp)) { 
                     System.out.println("Current Time :"+ currentTime);
                     System.out.println("Time stamp: " + timestamp);
                     writer.println("Token has expired");
@@ -389,7 +392,7 @@ public class TimeServer {
         String.valueOf(c.getId()),
         c.getName(),
         token,
-        String.valueOf(System.currentTimeMillis() + 10000)
+        String.valueOf(System.currentTimeMillis() / 1000L + 3600)
         );
 
         try (FileWriter writer = new FileWriter("credentials.txt", true)) {
@@ -662,7 +665,7 @@ public class TimeServer {
 
 
     private String checkInputWithDelay(BufferedReader reader, int delay){ //Provides a way to refresh the client and not just wait for the input
-        long startTime = System.currentTimeMillis();
+        long startTime = System.currentTimeMillis() / 1000L;
         String response = null;
         
         while (System.currentTimeMillis() - startTime < delay) {  
