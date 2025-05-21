@@ -21,14 +21,14 @@ public class AIIntegration {
     private static final int MAX_RETRIES = 2;
     private static final int RETRY_DELAY_MS = 1000;
     
-    private static final ExecutorService aiExecutor = 
-        Executors.newFixedThreadPool(5); 
-    
+    private static final ExecutorService aiExecutor = Executors.newVirtualThreadPerTaskExecutor();
     private static final ScheduledExecutorService pollingExecutor = 
-        Executors.newSingleThreadScheduledExecutor();
+        Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
+    
     private static final int POLLING_INTERVAL_SECONDS = 5;
     private static volatile boolean isPollingActive = false;
     private static ScheduledFuture<?> pollingTask = null;
+    private static final ReentrantLock pollingLock = new ReentrantLock();
     
     public interface AIResponseCallback {
         void onResponseReceived(String response, String originalMessage);
@@ -67,7 +67,7 @@ public class AIIntegration {
     }
 
     public static void processMessageAsync(String prompt, List<Message> conversationHistory, 
-                                          AIResponseCallback callback) {
+                                        AIResponseCallback callback) {
         if (prompt == null || prompt.trim().isEmpty()) {
             LOGGER.warning("Empty prompt received, rejecting request");
             callback.onError("Cannot process empty prompt", prompt);
@@ -193,6 +193,13 @@ public class AIIntegration {
                 
                 String response = sendRequest(requestBody);
                 if (response != null) {
+                    cacheLock.lock();
+                    try {
+                        responseCache.put(cacheKey, response);
+                        scheduleCacheCleanup(cacheKey);
+                    } finally {
+                        cacheLock.unlock();
+                    }
                     return response;
                 }
             }
@@ -265,27 +272,37 @@ public class AIIntegration {
         }
     }
 
-    private static synchronized void startPollingIfNotActive() {
-        if (!isPollingActive) {
-            LOGGER.info("Starting Ollama availability polling");
-            isPollingActive = true;
-            pollingTask = pollingExecutor.scheduleAtFixedRate(() -> {
-                LOGGER.fine("Polling Ollama availability...");
-                boolean available = pingOllama();
-                if (available) {
-                    LOGGER.info("Ollama is now available");
-                    stopPollingIfActive();
-                }
-            }, 0, POLLING_INTERVAL_SECONDS, TimeUnit.SECONDS);
+    private static void startPollingIfNotActive() {
+        pollingLock.lock();
+        try {
+            if (!isPollingActive) {
+                LOGGER.info("Starting Ollama availability polling");
+                isPollingActive = true;
+                pollingTask = pollingExecutor.scheduleAtFixedRate(() -> {
+                    LOGGER.fine("Polling Ollama availability...");
+                    boolean available = pingOllama();
+                    if (available) {
+                        LOGGER.info("Ollama is now available");
+                        stopPollingIfActive();
+                    }
+                }, 0, POLLING_INTERVAL_SECONDS, TimeUnit.SECONDS);
+            }
+        } finally {
+            pollingLock.unlock();
         }
     }
     
-    private static synchronized void stopPollingIfActive() {
-        if (isPollingActive && pollingTask != null) {
-            LOGGER.info("Stopping Ollama availability polling");
-            pollingTask.cancel(false);
-            isPollingActive = false;
-            pollingTask = null;
+    private static void stopPollingIfActive() {
+        pollingLock.lock();
+        try {
+            if (isPollingActive && pollingTask != null) {
+                LOGGER.info("Stopping Ollama availability polling");
+                pollingTask.cancel(false);
+                isPollingActive = false;
+                pollingTask = null;
+            }
+        } finally {
+            pollingLock.unlock();
         }
     }
 
@@ -315,21 +332,29 @@ public class AIIntegration {
     }
 
     private static void scheduleCacheCleanup(String key) {
-        new Timer().schedule(new TimerTask() {
-            @Override
-            public void run() {
+        Thread.startVirtualThread(() -> {
+            try {
+                Thread.sleep(CACHE_TTL);
                 cacheLock.lock();
                 try {
-                    responseCache.remove(key);
-                    LOGGER.fine("Removed expired cache entry: " + key);
+                    if (responseCache.remove(key) != null) {
+                        LOGGER.fine("Removed expired cache entry: " + key);
+                    }
                 } finally {
                     cacheLock.unlock();
                 }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOGGER.warning("Cache cleanup interrupted");
             }
-        }, CACHE_TTL);
+        });
     }
 
     private static String buildContext(String prompt, List<Message> history) {
+        if (prompt == null) {
+            throw new IllegalArgumentException("Prompt cannot be null");
+        }
+        
         StringBuilder context = new StringBuilder();
         if (history != null && !history.isEmpty()) {
             LOGGER.fine("Building context with " + history.size() + " historical messages");
@@ -347,14 +372,16 @@ public class AIIntegration {
     }
 
     private static String buildCacheKey(String prompt, List<Message> history) {
+        if (prompt == null) {
+            throw new IllegalArgumentException("Prompt cannot be null");
+        }
+        
         StringBuilder key = new StringBuilder(prompt);
         if (history != null) {
-            for (Message message : history) {
-                if (message != null && message.getAuthor() != null && message.getContent() != null) {
-                    key.append(message.getAuthor())
-                       .append(message.getContent());
-                }
-            }
+            history.stream()
+                .filter(Objects::nonNull)
+                .filter(m -> m.getAuthor() != null && m.getContent() != null)
+                .forEach(message -> key.append(message.getAuthor()).append(message.getContent()));
         }
         return key.toString();
     }
@@ -541,6 +568,11 @@ public class AIIntegration {
     }
     
     public static boolean isPollingActive() {
-        return isPollingActive;
+        pollingLock.lock();
+        try {
+            return isPollingActive;
+        } finally {
+            pollingLock.unlock();
+        }
     }
 }
