@@ -712,7 +712,7 @@ public class TimeServer {
 
 
     private String checkInputWithDelay(BufferedReader reader, int delay){ //Provides a way to refresh the client and not just wait for the input
-        long startTime = System.currentTimeMillis() / 1000L;
+        long startTime = System.currentTimeMillis();
         String response = null;
         
         while (System.currentTimeMillis() - startTime < delay) {  
