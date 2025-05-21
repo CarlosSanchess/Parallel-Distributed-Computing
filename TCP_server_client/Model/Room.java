@@ -57,7 +57,7 @@ public class Room {
     }
 
     public boolean addMember(Client member) {
-        if (members.size() < maxNumberOfMembers || maxNumberOfMembers != -1) {
+        if (members.size() < maxNumberOfMembers || maxNumberOfMembers == -1) {
             members.add(member);
             return true;
         } else {

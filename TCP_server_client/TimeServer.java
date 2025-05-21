@@ -1,10 +1,8 @@
 import java.io.*;
 import java.net.*;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
-
 
 import Model.*;
 import Model.Package;
@@ -13,6 +11,7 @@ import utils.shaHash;
 import utils.AIIntegration;
 import utils.outputPrints;
 import utils.utils;
+import utils.TokenCleanupTask;
 
 public class TimeServer {
     private List<Room> rooms;
@@ -21,7 +20,6 @@ public class TimeServer {
     private boolean isRunning = true;
     private ServerSocket serverSocket = null;
     private final ReentrantLock lock = new ReentrantLock();
-    private final Condition available = lock.newCondition();
     private final ExecutorService virtualThreadExecutor = 
         Executors.newVirtualThreadPerTaskExecutor();
     private int nextClientId;
@@ -72,12 +70,18 @@ public class TimeServer {
         try {
             serverSocket = new ServerSocket(this.port);
             System.out.println("Server is listening on port " + this.port);
-              // Start token cleanup scheduler in a virtual thread
-           
+            
+            TokenCleanupTask tokenCleanupTask = new TokenCleanupTask(lock);
+            Thread.ofVirtual()
+                .name("TokenCleanupThread")
+                .start(tokenCleanupTask);
+            
             while (isRunning) {
                 Socket socket = serverSocket.accept();
                 virtualThreadExecutor.submit(() -> handleRequest(socket));
             }
+            
+            tokenCleanupTask.stop();
         } catch (IOException ex) {
             System.out.println("Server exception: " + ex.getMessage());
             ex.printStackTrace();
@@ -137,7 +141,9 @@ public class TimeServer {
         if (choice == null) return null;
 
         if(choice.getMessage().equals("2")){
+            lock.lock();
             Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
+            lock.unlock();
             if(c != null){
                 return c;
             }
@@ -547,16 +553,17 @@ public class TimeServer {
                                 break;
                             }
                         lock.lock();
-
-                                room.addMessage(new Message(c.getName(), response));
-                                //if(room.getIsAi()){
-                                    // room.addMessage(new Message("Ai Bot", AIIntegration.performQuery(response, room.getMessages())));
-                                    // TODO
-                                //}
-    
-                                System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
-
-                        lock.unlock();
+                        try {
+                            Message userMessage = new Message(c.getName(), response);
+                            room.addMessage(userMessage);
+                            System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
+                            
+                            if(room.getIsAi()) {
+                                processAIResponseAsync(room, response);
+                            }
+                        } finally {
+                            lock.unlock();
+                        }
                     }
                 }
             }
@@ -565,6 +572,46 @@ public class TimeServer {
         }
     }
 
+    private void processAIResponseAsync(Room room, String userMessage) {
+        System.out.println("[INFO]: Processing asynchronous AI response for message: " + userMessage);
+        AIIntegration.processMessageAsync(userMessage, room.getMessages(), new AIIntegration.AIResponseCallback() {
+            @Override
+            public void onResponseReceived(String response, String originalMessage) {
+                lock.lock();
+                try {
+                    room.addMessage(new Message("AI Bot", response));
+                    System.out.println("[INFO]: Async AI response added to room " + room.getId());
+                } finally {
+                    lock.unlock();
+                }
+            }
+            
+            @Override
+            public void onError(String errorMessage, String originalMessage) {
+                lock.lock();
+                try {
+                    room.addMessage(new Message("AI Bot", "Sorry, I couldn't process that request: " + errorMessage));
+                    System.err.println("[ERROR]: Async AI response failed: " + errorMessage);
+                } finally {
+                    lock.unlock();
+                }
+            }
+        });
+    }
+
+    private String readLineForFlags(BufferedReader reader, PrintWriter writer){
+            String input = readInput(reader).getMessage();
+
+            if(input.equals("/help")){
+                outputPrints.printHelpPrompt(writer);
+                readInput(reader).getMessage(); 
+                 outputPrints.cleanClientTerminal(writer);
+                 utils.safeSleep(500);
+                return null;
+            } else {
+                return input;
+            }
+    }
 
     private void handleRoomCreation(BufferedReader reader, PrintWriter writer, Client c) {
         outputPrints.cleanClientTerminal(writer);
