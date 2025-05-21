@@ -373,6 +373,7 @@ public class TimeClient {
         helpText.append("/disconnect - Disconnect from server\n");
         helpText.append("/reconnect - Reconnect to server\n");
         helpText.append("/clear - Clear the output window\n");
+        helpText.append("/create - Create a new Room\n");
         helpText.append("/help - Show this help message\n");
         helpText.append("/register <username> <password> - Register a new account\n");
         helpText.append("/login <username> <password> - Login to your account\n");
@@ -525,7 +526,6 @@ public class TimeClient {
                 displayMessage(text, false);
             }
             
-            outputArea.setCaretPosition(outputArea.getText().length());
         });
     }
     

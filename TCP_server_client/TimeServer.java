@@ -89,9 +89,9 @@ public class TimeServer {
         try {
             BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
             PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
-            
+            Client c = null;
+
             try {
-                Client c = null;
                 while(true){
                     if(c == null || c.getState() == ClientState.LOGGED_OUT) { 
                         c = performAuth(sockClient);
@@ -106,7 +106,16 @@ public class TimeServer {
             } catch (IOException e) {
                 System.out.println("Client handling error: " + e.getMessage());
             } finally {
-                sockClient.close();
+                if (c != null) {
+                    handleDisconnect(c, sockClient);
+                } else {
+                    try {
+                        System.out.println("adsa");
+                        sockClient.close();
+                    } catch (IOException e) {
+                        System.out.println("Error closing socket: " + e.getMessage());
+                    }
+                }
             }
         } catch (IOException e) {
             System.out.println("[ERROR] Failed to handle client request: " + e.getMessage());
@@ -141,7 +150,7 @@ public class TimeServer {
             lock.lock();
             Client c;
             if (choice.getMessage().equals("1")) {
-                c = handleRegistration(sockClient, username, password, writer);
+                c = handleRegistration(sockClient, username, password, writer, reader);
             } else {
                 c =  handleLogin(sockClient, username, password, writer);
             }
@@ -195,15 +204,24 @@ public class TimeServer {
         }
     }
 
-    private Client handleRegistration(Socket sockClient, String username, String password, PrintWriter writer) {
+    private Client handleRegistration(Socket sockClient, String username, String password, PrintWriter writer, BufferedReader reader) {
         try { 
 
-            //FIXXX 
-
-            // if (isUsernameTaken(username)) {
-            //     writer.println("Username already taken");
-            //     return null;
-            // }
+            if (isUsernameTaken(username)) {
+                writer.println("Username '" + username + "' is already taken. Enter a new username or 'q' to quit.");
+                while (true) {
+                    String newUsername = reader.readLine().trim(); 
+                    if (newUsername.equalsIgnoreCase("q")) {
+                        writer.println("Registration cancelled.");
+                        return null;
+                    }
+                    if (!isUsernameTaken(newUsername)) {
+                        username = newUsername; 
+                        break; 
+                    }
+                    writer.println("Username '" + newUsername + "' is taken. Try again or enter 'q' to quit.");
+                }
+            }
             
             String hashedPassword = shaHash.toHexString(shaHash.getSHA(password));
             Client c = new Client(nextClientId, sockClient.getInetAddress(), username, hashedPassword, false);
@@ -217,6 +235,7 @@ public class TimeServer {
 
             writer.println(p.serialize());
             System.out.println("[INFO] User " + username + " successfully registered.");
+            utils.safeSleep(500);
 
             return c;
         } catch (Exception e) {
@@ -230,6 +249,7 @@ public class TimeServer {
             Map<String, String[]> credentials = readCredentials();
             if (!credentials.containsKey(username)) {
                 writer.println("Username not found");
+                utils.safeSleep(500);
                 return null;
             }
             
@@ -266,6 +286,7 @@ public class TimeServer {
             } else {
                 System.out.println("Invalid Password");
                 writer.println("Invalid password");
+                utils.safeSleep(500);
                 return null;
             }
         } catch (Exception e) {
@@ -323,7 +344,13 @@ public class TimeServer {
         return null;
     }
     private boolean isUsernameTaken(String username) throws IOException {
-        return readCredentials().containsKey(username);
+        Map<String, String[]> credentials = readCredentials();
+        for (String[] userData : credentials.values()) {
+            if (username.equals(userData[2])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private Map<String, String[]> readCredentials() throws IOException {
@@ -395,8 +422,9 @@ public class TimeServer {
             }
 
             writer.println("To join a room, type: /join <room number> or /create to create a room.");
-            String input = readLineForFlags(reader, writer);
-           
+            String input = checkInputWithDelay(reader, 1000);
+            if(input == null){continue;}
+
             if (handleMainHubCommand(input, c, reader, writer, sockClient)) {
                 return;
             }
@@ -468,7 +496,7 @@ public class TimeServer {
                 return false; 
     
             case "/disconnect":
-                handleDisconnect(c, sockClient, writer);
+                handleDisconnect(c, sockClient);
                 return true; 
     
             default:
@@ -518,11 +546,12 @@ public class TimeServer {
                         writer.println("You have left the room.");
                         break;
                     } else {
-                        if(response.equals("/disconnect")) {
-                            handleDisconnect(c, sockClient, writer);
-                            break;
-                        }
-                        
+
+                            if(response.equals("/disconnect"))
+                            {
+                                handleDisconnect(c, sockClient);
+                                break;
+                            }
                         lock.lock();
                         try {
                             Message userMessage = new Message(c.getName(), response);
@@ -691,7 +720,7 @@ public class TimeServer {
         }
         return response;
     }
-    private void handleDisconnect(Client c, Socket sockClient, PrintWriter writer) {
+    private void handleDisconnect(Client c, Socket sockClient) {
         try {
             lock.lock();
             if (c.getState() == ClientState.IN_ROOM) {
