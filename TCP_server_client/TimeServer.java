@@ -141,7 +141,9 @@ public class TimeServer {
         if (choice == null) return null;
 
         if(choice.getMessage().equals("2")){
+            lock.lock();
             Client c = handleLoginWithToken(sockClient, writer, choice.getToken());
+            lock.unlock();
             if(c != null){
                 return c;
             }
