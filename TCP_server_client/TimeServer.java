@@ -300,8 +300,8 @@ public class TimeServer {
         }
     }
     
-    private  Client handleLoginWithToken(Socket sockClient,PrintWriter writer,String Token){
-        if(Token != null && !Token.isEmpty()){
+    private Client handleLoginWithToken(Socket sockClient, PrintWriter writer, String Token) {
+        if(Token != null && !Token.isEmpty()) {
             Map<String, String[]> tokenRecords = utils.readTokens();
             if (tokenRecords.containsKey(Token)) {
                 String[] tokenData = tokenRecords.get(Token);
@@ -311,21 +311,12 @@ public class TimeServer {
                 
                 long currentTime = System.currentTimeMillis() / 1000L;
                 if (currentTime > Long.parseLong(timestamp)) { 
-                    System.out.println("Current Time :"+ currentTime);
+                    System.out.println("Current Time: " + currentTime);
                     System.out.println("Time stamp: " + timestamp);
                     writer.println("Token has expired");
-                    System.out.println("[INFO]TOKEN EXPRIED");
+                    System.out.println("[INFO] TOKEN EXPIRED");
                     return null;
                 }
-                
-                // for (Client c : clients) {
-                //     if (c.getId() == Integer.parseInt(userId)) {
-                //         writer.println("User already logged in");
-                //         System.out.println("ALREADY LOGGED IN");
-
-                //         return c;
-                //     }
-                // }
                 
                 Client c = new Client(
                     Integer.parseInt(userId),
@@ -380,7 +371,7 @@ public class TimeServer {
         return credentials;
     }
 
-    private void storingCredentials(Client c, String token) throws IOException {
+   private void storingCredentials(Client c, String token) throws IOException {
         String data = String.join(",",
             String.valueOf(c.getId()),
             c.getInetaddr().getHostAddress(),
@@ -389,10 +380,10 @@ public class TimeServer {
         );
         
         String cookie = String.join(",", 
-        String.valueOf(c.getId()),
-        c.getName(),
-        token,
-        String.valueOf(System.currentTimeMillis() / 1000L + 3600)
+            String.valueOf(c.getId()),
+            c.getName(),
+            token,
+            String.valueOf(System.currentTimeMillis() / 1000L + 3600) // Store timestamp in seconds with 1-hour validity
         );
 
         try (FileWriter writer = new FileWriter("credentials.txt", true)) {
@@ -664,8 +655,8 @@ public class TimeServer {
     }
 
 
-    private String checkInputWithDelay(BufferedReader reader, int delay){ //Provides a way to refresh the client and not just wait for the input
-        long startTime = System.currentTimeMillis() / 1000L;
+    private String checkInputWithDelay(BufferedReader reader, int delay) {
+        long startTime = System.currentTimeMillis(); 
         String response = null;
         
         while (System.currentTimeMillis() - startTime < delay) {  
