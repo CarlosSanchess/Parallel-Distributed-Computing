@@ -1,10 +1,8 @@
 import java.io.*;
 import java.net.*;
-import java.security.NoSuchAlgorithmException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
-
 
 import Model.*;
 import Model.Package;
@@ -13,6 +11,7 @@ import utils.shaHash;
 import utils.AIIntegration;
 import utils.outputPrints;
 import utils.utils;
+import utils.TokenCleanupTask;
 
 public class TimeServer {
     private List<Room> rooms;
@@ -21,7 +20,6 @@ public class TimeServer {
     private boolean isRunning = true;
     private ServerSocket serverSocket = null;
     private final ReentrantLock lock = new ReentrantLock();
-    private final Condition available = lock.newCondition();
     private final ExecutorService virtualThreadExecutor = 
         Executors.newVirtualThreadPerTaskExecutor();
     private int nextClientId;
@@ -72,12 +70,18 @@ public class TimeServer {
         try {
             serverSocket = new ServerSocket(this.port);
             System.out.println("Server is listening on port " + this.port);
-              // Start token cleanup scheduler in a virtual thread
-           
+            
+            TokenCleanupTask tokenCleanupTask = new TokenCleanupTask(lock);
+            Thread.ofVirtual()
+                .name("TokenCleanupThread")
+                .start(tokenCleanupTask);
+            
             while (isRunning) {
                 Socket socket = serverSocket.accept();
                 virtualThreadExecutor.submit(() -> handleRequest(socket));
             }
+            
+            tokenCleanupTask.stop();
         } catch (IOException ex) {
             System.out.println("Server exception: " + ex.getMessage());
             ex.printStackTrace();
