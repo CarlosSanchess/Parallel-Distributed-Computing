@@ -2,7 +2,6 @@ package Model;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.security.PKCS12Attribute;
 
 public class Package {
     private final String message;

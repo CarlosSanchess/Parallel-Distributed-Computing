@@ -4,6 +4,9 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
 
+import javax.net.ssl.*;
+import java.security.*;
+
 import Model.*;
 import Model.Package;
 import Model.Client.ClientState;
@@ -18,11 +21,15 @@ public class TimeServer {
     private int port;
     private List<Client> clients;
     private boolean isRunning = true;
-    private ServerSocket serverSocket = null;
+    private SSLServerSocket serverSocket = null;
     private final ReentrantLock lock = new ReentrantLock();
     private final ExecutorService virtualThreadExecutor = 
         Executors.newVirtualThreadPerTaskExecutor();
     private int nextClientId;
+
+    private static final String KEY_MANAGER_ALGORITHM = KeyManagerFactory.getDefaultAlgorithm();
+    private static final String TRUST_MANAGER_ALGORITHM = TrustManagerFactory.getDefaultAlgorithm();
+    private static final String PROTOCOL = "TLSv1.3"; 
 
     public TimeServer(int port) {
         this.rooms = new ArrayList<>();
@@ -32,12 +39,12 @@ public class TimeServer {
     }
 
     private void initializeNextClientId() {
-            nextClientId = utils.readLastId() + 1;
+        nextClientId = utils.readLastId() + 1;
     }
 
     public static void main(String[] args) {
         if (args.length < 1) {
-            System.out.println("Usage: java TimeServer <port>");
+            System.out.println("Usage: java SecureTimeServer <port>");
             return;
         }
         int port = Integer.parseInt(args[0]);
@@ -66,10 +73,72 @@ public class TimeServer {
         System.out.println("Server has shut down gracefully");
     }
 
+    private String getKeystorePath() {
+        String path = System.getenv("TIMESERVER_KEYSTORE_PATH");
+        return (path != null) ? path : "server.keystore"; 
+    }
+
+    private String getKeystorePassword() {
+        String password = System.getenv("TIMESERVER_KEYSTORE_PASSWORD");
+        if (password == null) {
+            System.err.println("WARNING: Keystore password not set in environment variables");
+            return "serverpass";
+        }
+        return password;
+    }
+
+    private SSLServerSocket createSSLServerSocket() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("JKS");
+        try (FileInputStream fis = new FileInputStream(getKeystorePath())) {
+            keyStore.load(fis, getKeystorePassword().toCharArray());
+        }
+
+        KeyManagerFactory keyManagerFactory = KeyManagerFactory.getInstance(KEY_MANAGER_ALGORITHM);
+        keyManagerFactory.init(keyStore, getKeystorePassword().toCharArray());
+
+        TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(TRUST_MANAGER_ALGORITHM);
+        trustManagerFactory.init(keyStore);
+
+        SSLContext sslContext = SSLContext.getInstance(PROTOCOL);
+        sslContext.init(
+            keyManagerFactory.getKeyManagers(),
+            trustManagerFactory.getTrustManagers(),
+            null
+        );
+
+        SSLServerSocketFactory sslServerSocketFactory = sslContext.getServerSocketFactory();
+        SSLServerSocket sslServerSocket = (SSLServerSocket) sslServerSocketFactory.createServerSocket(this.port);
+        
+        sslServerSocket.setEnabledCipherSuites(getStrongCipherSuites(sslServerSocket.getSupportedCipherSuites()));
+        
+        sslServerSocket.setNeedClientAuth(false);
+
+        System.out.println("Using keystore: " + getKeystorePath());
+        System.out.println("Secure server is listening on port " + this.port);
+        System.out.println("Using protocol: " + PROTOCOL);
+        System.out.println("Enabled cipher suites: " + String.join(", ", sslServerSocket.getEnabledCipherSuites()));
+        
+        return sslServerSocket;
+    }
+    
+    private String[] getStrongCipherSuites(String[] supportedCipherSuites) {
+        List<String> strongCiphers = new ArrayList<>();
+        for (String cipher : supportedCipherSuites) {
+            if (!cipher.contains("NULL") && 
+                !cipher.contains("anon") && 
+                !cipher.contains("DES") &&
+                !cipher.contains("RC4")) {
+                strongCiphers.add(cipher);
+            }
+        }
+        return strongCiphers.toArray(new String[0]);
+    }
+
     public void start() {
         try {
-            serverSocket = new ServerSocket(this.port);
-            System.out.println("Server is listening on port " + this.port);
+            serverSocket = createSSLServerSocket();
+            System.out.println("Secure server is listening on port " + this.port);
+            System.out.println("Using protocol: " + PROTOCOL);
             
             TokenCleanupTask tokenCleanupTask = new TokenCleanupTask(lock);
             Thread.ofVirtual()
@@ -77,12 +146,29 @@ public class TimeServer {
                 .start(tokenCleanupTask);
             
             while (isRunning) {
-                Socket socket = serverSocket.accept();
-                virtualThreadExecutor.submit(() -> handleRequest(socket));
+                SSLSocket socket = (SSLSocket) serverSocket.accept();
+                
+                socket.setEnabledCipherSuites(getStrongCipherSuites(socket.getSupportedCipherSuites()));
+                
+                virtualThreadExecutor.submit(() -> {
+                    try {
+                        socket.startHandshake();
+                        System.out.println("SSL handshake completed with client: " + socket.getInetAddress());
+                        
+                        handleRequest(socket);
+                    } catch (IOException e) {
+                        System.out.println("Handshake failed: " + e.getMessage());
+                        try {
+                            socket.close();
+                        } catch (IOException ex) {
+                            System.out.println("Error closing socket: " + ex.getMessage());
+                        }
+                    }
+                });
             }
             
             tokenCleanupTask.stop();
-        } catch (IOException ex) {
+        } catch (Exception ex) {
             System.out.println("Server exception: " + ex.getMessage());
             ex.printStackTrace();
         } finally {
@@ -90,7 +176,7 @@ public class TimeServer {
         }
     }
 
-    private void handleRequest(Socket sockClient) {
+    private void handleRequest(SSLSocket sockClient) {
         try {
             BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
             PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
@@ -107,7 +193,7 @@ public class TimeServer {
                     if(c.getState() == ClientState.IN_ROOM){
                         showRoom(c, sockClient, c.getRoomId(), reader, writer);
                     }
-            }
+                }
             } catch (IOException e) {
                 System.out.println("Client handling error: " + e.getMessage());
             } finally {
@@ -115,7 +201,6 @@ public class TimeServer {
                     handleDisconnect(c, sockClient);
                 } else {
                     try {
-                        System.out.println("adsa");
                         sockClient.close();
                     } catch (IOException e) {
                         System.out.println("Error closing socket: " + e.getMessage());
@@ -127,7 +212,7 @@ public class TimeServer {
         }
     }
 
-    private Client performAuth(Socket sockClient) throws IOException {
+    private Client performAuth(SSLSocket sockClient) throws IOException {
         BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
         PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
 
@@ -183,7 +268,7 @@ public class TimeServer {
         while (true) {
             writer.println("Enter your username (or 'q' to quit):");
             String username = readInput(reader).getMessage();
-            System.out.println("User Name" + username);
+            System.out.println("User Name: " + username);
             if (username.equalsIgnoreCase("q")) {
                 return null;
             }
@@ -198,7 +283,7 @@ public class TimeServer {
         while (true) {
             writer.println("Enter your password (or 'q' to quit):");
             String password = readInput(reader).getMessage();
-            System.out.println("PasssWord" + password);
+            System.out.println("Password received");
             if (password.equalsIgnoreCase("q")) {
                 return null;
             }
@@ -209,9 +294,8 @@ public class TimeServer {
         }
     }
 
-    private Client handleRegistration(Socket sockClient, String username, String password, PrintWriter writer, BufferedReader reader) {
+    private Client handleRegistration(SSLSocket sockClient, String username, String password, PrintWriter writer, BufferedReader reader) {
         try { 
-
             if (isUsernameTaken(username)) {
                 writer.println("Username '" + username + "' is already taken. Enter a new username or 'q' to quit.");
                 while (true) {
@@ -249,7 +333,7 @@ public class TimeServer {
         }
     }
 
-    private Client handleLogin(Socket sockClient, String username, String password, PrintWriter writer) {
+    private Client handleLogin(SSLSocket sockClient, String username, String password, PrintWriter writer) {
         try {  
             Map<String, String[]> credentials = readCredentials();
             if (!credentials.containsKey(username)) {
@@ -265,7 +349,6 @@ public class TimeServer {
             String token = UUID.randomUUID().toString();
 
             if (storedHash.equals(inputHash)) {
-
                 for (Client c : clients) {
                     if (c.getName().equals(username)) {
                         utils.updateOrCreateEntry(token,creds[0], username);
@@ -304,7 +387,7 @@ public class TimeServer {
         }
     }
     
-    private  Client handleLoginWithToken(Socket sockClient,PrintWriter writer,String Token){
+    private Client handleLoginWithToken(SSLSocket sockClient, PrintWriter writer, String Token){
         if(Token != null && !Token.isEmpty()){
             Map<String, String[]> tokenRecords = utils.readTokens();
             if (tokenRecords.containsKey(Token)) {
@@ -315,21 +398,12 @@ public class TimeServer {
                 
                 long currentTime = System.currentTimeMillis() / 1000L;
                 if (currentTime > Long.parseLong(timestamp)) { 
-                    System.out.println("Current Time :"+ currentTime);
+                    System.out.println("Current Time: "+ currentTime);
                     System.out.println("Time stamp: " + timestamp);
                     writer.println("Token has expired");
-                    System.out.println("[INFO]TOKEN EXPRIED");
+                    System.out.println("[INFO] TOKEN EXPIRED");
                     return null;
                 }
-                
-                // for (Client c : clients) {
-                //     if (c.getId() == Integer.parseInt(userId)) {
-                //         writer.println("User already logged in");
-                //         System.out.println("ALREADY LOGGED IN");
-
-                //         return c;
-                //     }
-                // }
                 
                 Client c = new Client(
                     Integer.parseInt(userId),
@@ -350,6 +424,7 @@ public class TimeServer {
         }
         return null;
     }
+
     private boolean isUsernameTaken(String username) throws IOException {
         Map<String, String[]> credentials = readCredentials();
         for (String[] userData : credentials.values()) {
@@ -393,10 +468,10 @@ public class TimeServer {
         );
         
         String cookie = String.join(",", 
-        String.valueOf(c.getId()),
-        c.getName(),
-        token,
-        String.valueOf(System.currentTimeMillis() / 1000L + 3600)
+            String.valueOf(c.getId()),
+            c.getName(),
+            token,
+            String.valueOf(System.currentTimeMillis() / 1000L + 3600)
         );
 
         try (FileWriter writer = new FileWriter("credentials.txt", true)) {
@@ -407,18 +482,16 @@ public class TimeServer {
         }
     }
     
-    private void showMainHub(Client c, Socket sockClient) throws IOException {
-        Room testRoom = new Room(rooms.size(),"TestRoom", 5, false); // name: TestRoom, max 5 members, not AI
+    private void showMainHub(Client c, SSLSocket sockClient) throws IOException {
+        Room testRoom = new Room(rooms.size(),"TestRoom", 5, false); 
         rooms.add(testRoom);
         BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
         PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
     
-    
-
         while (true) {
             utils.safeSleep(500);
             outputPrints.cleanClientTerminal(writer);
-            writer.println("Welcome to xchat!");
+            writer.println("Welcome to xchat! (Secured with TLS)");
     
             writer.println("Rooms Available:");
         
@@ -443,49 +516,52 @@ public class TimeServer {
             }
 
             int choice;
-                try {
-                    choice = Integer.parseInt(parts[1]) - 1;
-                } catch (NumberFormatException e) {
-                    writer.println("Invalid room number. Please enter a valid number after /join.");
+            try {
+                choice = Integer.parseInt(parts[1]) - 1;
+            } catch (NumberFormatException e) {
+                writer.println("Invalid room number. Please enter a valid number after /join.");
+                continue;
+            }
+
+            if (choice < 0 || choice >= rooms.size()) {
+                writer.println("No room with that number. Please choose a valid room.");
+                continue;
+            }
+            
+            lock.lock();
+            try {
+                Room selectedRoom = rooms.get(choice);
+
+                if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers()) {
+                    writer.println("That room is full. Please choose another one:");
                     continue;
                 }
+                
+                selectedRoom.addMember(c);
+                c.setRoom(selectedRoom.getId());
 
-                if (choice < 0 || choice >= rooms.size()) {
-                    writer.println("No room with that number. Please choose a valid room.");
-                    continue;
-                }
-                lock.lock();
-                    Room selectedRoom = rooms.get(choice);
-
-                    if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers()) {
-                        writer.println("That room is full. Please choose another one:");
-                        lock.unlock();
-                        continue;
-                    }
-                    
-                    selectedRoom.addMember(c);
-                    c.setRoom(selectedRoom.getId());
-
-                    writer.println("✅ Joined room: " + selectedRoom.getName());
-                    System.out.println("[INFO]: " + c.getName() + " joined " + selectedRoom.getName());
-                    c.setState(ClientState.IN_ROOM);
-
+                writer.println("✅ Joined room: " + selectedRoom.getName());
+                System.out.println("[INFO]: " + c.getName() + " joined " + selectedRoom.getName());
+                c.setState(ClientState.IN_ROOM);
+            } finally {
                 lock.unlock();
+            }
     
             break;
         }
     }
-    private boolean handleMainHubCommand(String input, Client c, BufferedReader reader, PrintWriter writer, Socket sockClient) throws IOException {
+
+    private boolean handleMainHubCommand(String input, Client c, BufferedReader reader, PrintWriter writer, SSLSocket sockClient) throws IOException {
         switch (input) {
             case "/quit", "/exit":
-                    lock.lock();
-                    try{
-                        c.setRoom(-1); // To make sure
-                        clients.remove(c);
-                    } finally{
-                        lock.unlock();
-                    }
-            return true; 
+                lock.lock();
+                try {
+                    c.setRoom(-1); 
+                    clients.remove(c);
+                } finally {
+                    lock.unlock();
+                }
+                return true; 
     
             case "/logout":
                 lock.lock();
@@ -512,7 +588,7 @@ public class TimeServer {
         }
     }
     
-    private void showRoom(Client c, Socket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
+    private void showRoom(Client c, SSLSocket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
         Room room = null;
         lock.lock();
         try {
@@ -553,17 +629,15 @@ public class TimeServer {
                         writer.println("You have left the room.");
                         break;
                     } else {
-
-                            if(response.equals("/disconnect"))
-                            {
-                                handleDisconnect(c, sockClient);
-                                break;
-                            }
+                        if(response.equals("/disconnect")) {
+                            handleDisconnect(c, sockClient);
+                            break;
+                        }
                         lock.lock();
                         try {
                             Message userMessage = new Message(c.getName(), response);
                             room.addMessage(userMessage);
-                            System.out.println("[INFO]:" + c.getName() + " sent message in room " + roomId);
+                            System.out.println("[INFO]: " + c.getName() + " sent message in room " + roomId);
                             
                             if(room.getIsAi()) {
                                 processAIResponseAsync(room, response);
@@ -606,111 +680,92 @@ public class TimeServer {
         });
     }
 
-    private String readLineForFlags(BufferedReader reader, PrintWriter writer){
-            String input = readInput(reader).getMessage();
-
-            if(input.equals("/help")){
-                outputPrints.printHelpPrompt(writer);
-                readInput(reader).getMessage(); 
-                 outputPrints.cleanClientTerminal(writer);
-                 utils.safeSleep(500);
-                return null;
-            } else {
-                return input;
-            }
-    }
-
     private void handleRoomCreation(BufferedReader reader, PrintWriter writer, Client c) {
         outputPrints.cleanClientTerminal(writer);
         writer.println("=== Create a New Room ===");
         writer.println("Press 'q' at any time to cancel.\n");
     
-            String name = null;
-            while (true) {
-                writer.println("Enter the room name: ");
-               // writer.flush();
-                name = readInput(reader).getMessage();
-    
-                if (name.equalsIgnoreCase("q")) {
-                    writer.println("❌ Room creation cancelled.");
-                    utils.safeSleep(500);
-                    return;
-                }
-    
-                if (!name.isEmpty()) {
-                    break;
-                }
-    
-                writer.println("⚠️ Room name cannot be empty.");
+        String name = null;
+        while (true) {
+            writer.println("Enter the room name: ");
+            name = readInput(reader).getMessage();
+
+            if (name.equalsIgnoreCase("q")) {
+                writer.println("❌ Room creation cancelled.");
+                utils.safeSleep(500);
+                return;
             }
-    
-            // 2. Is AI room? (y/n)
-            boolean isAiRoom = false;
-            while (true) {
-                writer.println("Is this an AI room? (y/n): ");
-                String aiResponse = readInput(reader).getMessage().toLowerCase();
-    
-                if (aiResponse.equals("q")) {
-                    writer.println("❌ Room creation cancelled.");
-                    utils.safeSleep(500);
-                    return;
-                }
-    
-                if (aiResponse.equals("y")) {
-                    isAiRoom = true;
-                    break;
-                } else if (aiResponse.equals("n")) {
-                    isAiRoom = false;
+
+            if (!name.isEmpty()) {
+                break;
+            }
+
+            writer.println("⚠️ Room name cannot be empty.");
+        }
+
+        // 2. Is AI room? (y/n)
+        boolean isAiRoom = false;
+        while (true) {
+            writer.println("Is this an AI room? (y/n): ");
+            String aiResponse = readInput(reader).getMessage().toLowerCase();
+
+            if (aiResponse.equals("q")) {
+                writer.println("❌ Room creation cancelled.");
+                utils.safeSleep(500);
+                return;
+            }
+
+            if (aiResponse.equals("y")) {
+                isAiRoom = true;
+                break;
+            } else if (aiResponse.equals("n")) {
+                isAiRoom = false;
+                break;
+            } else {
+                writer.println("⚠️ Please enter 'y' or 'n'.");
+            }
+        }
+
+        // 3. Max members
+        int maxMembers;
+        while (true) {
+            writer.println("Max number of members (-1 for infinite): ");
+            String input = readInput(reader).getMessage();
+
+            if (input.equalsIgnoreCase("q")) {
+                writer.println("❌ Room creation cancelled.");
+                return;
+            }
+
+            try {
+                maxMembers = Integer.parseInt(input);
+                if (maxMembers == -1 || maxMembers > 0) {
                     break;
                 } else {
-                    writer.println("⚠️ Please enter 'y' or 'n'.");
+                    writer.println("⚠️ Please enter -1 or a positive number.");
                 }
+            } catch (NumberFormatException e) {
+                writer.println("⚠️ Please enter a valid number.");
             }
-    
-            // 3. Max members
-            int maxMembers;
-            while (true) {
-                writer.println("Max number of members (-1 for infinite): ");
-                String input = readInput(reader).getMessage();
-    
-                if (input.equalsIgnoreCase("q")) {
-                    writer.println("❌ Room creation cancelled.");
-                    return;
-                }
-    
-                try {
-                    maxMembers = Integer.parseInt(input);
-                    if (maxMembers == -1 || maxMembers > 0) {
-                        break;
-                    } else {
-                        writer.println("⚠️ Please enter -1 or a positive number.");
-                    }
-                } catch (NumberFormatException e) {
-                    writer.println("⚠️ Please enter a valid number.");
-                }
-            }
-    
-            // 4. Create room
-            lock.lock();
-            try{
-                int roomId = rooms.size();
-                Room r = new Room(roomId, name, maxMembers, isAiRoom);
-                rooms.add(r);
-                System.out.println("[INFO]: " + c.getName() + " created " + r.getName());
+        }
 
-            }finally{
-                lock.unlock();
-            }
-           
-            writer.println("\n✅ Room created successfully!");
-            utils.safeSleep(500);
-            return;
-      
+        // 4. Create room
+        lock.lock();
+        try {
+            int roomId = rooms.size();
+            Room r = new Room(roomId, name, maxMembers, isAiRoom);
+            rooms.add(r);
+            System.out.println("[INFO]: " + c.getName() + " created " + r.getName());
+        } finally {
+            lock.unlock();
+        }
+       
+        writer.println("\n✅ Room created successfully!");
+        utils.safeSleep(500);
     }
 
-
-    private String checkInputWithDelay(BufferedReader reader, int delay){ //Provides a way to refresh the client and not just wait for the input
-        long startTime = System.currentTimeMillis() / 1000L;
+    private String checkInputWithDelay(BufferedReader reader, int delay) { //Provides a way to refresh the client and not just wait for the input
+        long startTime = System.currentTimeMillis();
         String response = null;
         
         while (System.currentTimeMillis() - startTime < delay) {  
@@ -727,10 +782,12 @@ public class TimeServer {
         }
         return response;
     }
-    private void handleDisconnect(Client c, Socket sockClient) {
+
+    private void handleDisconnect(Client c, SSLSocket sockClient) {
         try {
             lock.lock();
-            if (c.getState() == ClientState.IN_ROOM) {
+            try {
+                if (c.getState() == ClientState.IN_ROOM) {
                     for (Room room : rooms) {
                         if (room.getId() == c.getRoomId()) {
                             room.removeMember(c);
@@ -739,30 +796,22 @@ public class TimeServer {
                         }
                     }
                     c.leaveRoom();
-                
+                }
+        
+                clients.remove(c);
+                System.out.println("[INFO] " + c.getName() + " disconnected");
+            } finally {
+                lock.unlock();
             }
-    
-            clients.remove(c);
-            System.out.println("[INFO] " + c.getName() + " disconnected");
-    
            
             sockClient.close();
-            
         } catch (IOException e) {
             System.err.println("[ERROR] Error disconnecting client " + c.getName() + ": " + e.getMessage());
-            lock.unlock();
-        } finally {
-            if (clients.contains(c)) {
-                clients.remove(c);
-            }
-            lock.unlock();
         }
     }
-    private Model.Package readInput(BufferedReader reader){
-        Model.Package p = Model.Package.readInput(reader);
-    
-         return p;
-    }
 
-   
+    private Model.Package readInput(BufferedReader reader) {
+        Model.Package p = Model.Package.readInput(reader);
+        return p;
+    }
 }

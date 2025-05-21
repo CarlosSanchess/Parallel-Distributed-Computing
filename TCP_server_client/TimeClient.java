@@ -1,7 +1,15 @@
 import java.awt.*;
 import java.awt.event.*;
 import java.net.*;
+import java.security.KeyStore;
+import java.security.SecureRandom;
 import java.util.ArrayList;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLSocket;
+import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.TrustManagerFactory;
+
 import java.io.*;
 
 import Model.Package;
@@ -45,11 +53,11 @@ public class TimeClient {
     private Color headerColor = new Color(230, 230, 230);
     private Color outputBackgroundColor = new Color(255, 255, 255);
     private Color roomInfoBackgroundColor = new Color(240, 248, 255);
+
+    private static final String PROTOCOL = "TLSv1.3";
+    private static final String TRUSTSTORE_PATH_ENV = "TIMECLIENT_TRUSTSTORE_PATH";
+    private static final String TRUSTSTORE_PASSWORD_ENV = "TIMECLIENT_TRUSTSTORE_PASSWORD";
     
-    // Message display colors and constants
-    private static final Color MESSAGE_HEADER_COLOR = new Color(70, 130, 180);
-    private static final Color MESSAGE_SEPARATOR_COLOR = new Color(200, 200, 200);
-    private static final Color MESSAGE_BACKGROUND_COLOR = new Color(250, 250, 250);
     private static final Color MESSAGE_TEXT_COLOR = new Color(50, 50, 50);
     private static final Color TIMESTAMP_COLOR = new Color(100, 100, 100);
     private static final int SEPARATOR_PADDING = 3;
@@ -405,24 +413,31 @@ public class TimeClient {
                         statusLabel.setText("Status: Connecting...");
                     });
                     
-                    socket = new Socket(hostname, port);
-                    writer = new PrintWriter(socket.getOutputStream(), true);
+                    SSLContext sslContext = createSSLContext();
+                    SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
                     
-                    new Thread(new ServerResponseHandler(socket)).start();
+                    SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(hostname, port);
+                    sslSocket.setEnabledCipherSuites(getStrongCipherSuites(sslSocket.getSupportedCipherSuites()));
+                    
+                    sslSocket.startHandshake();
+                    
+                    writer = new PrintWriter(sslSocket.getOutputStream(), true);
+                    
+                    new Thread(new ServerResponseHandler(sslSocket)).start();
                     
                     EventQueue.invokeLater(() -> {
                         statusLabel.setText("Status: Connected");
                         disconnectButton.setEnabled(true);
-                        appendToOutput("Connected to server at " + hostname + ":" + port);
+                        appendToOutput("Securely connected to server at " + hostname + ":" + port);
                     });
                     break;
-                } catch (IOException ex) {
+                } catch (Exception ex) {
                     final String errorMsg = ex.getMessage();
                     EventQueue.invokeLater(() -> {
                         statusLabel.setText("Status: Connection failed");
                         connectButton.setEnabled(true);
                         disconnectButton.setEnabled(false);
-                        appendToOutput("Connection failed: " + errorMsg);
+                        appendToOutput("Secure connection failed: " + errorMsg);
                         appendToOutput("Retrying in 5 seconds... (Press Disconnect to cancel)");
                     });
                     
@@ -443,6 +458,46 @@ public class TimeClient {
                 }
             }
         }).start();
+    }
+
+    private SSLContext createSSLContext() throws Exception {
+        String truststorePath = System.getenv(TRUSTSTORE_PATH_ENV);
+        if (truststorePath == null) {
+            truststorePath = "client.truststore"; 
+        }
+        
+        String truststorePassword = System.getenv(TRUSTSTORE_PASSWORD_ENV);
+        if (truststorePassword == null) {
+            System.err.println("WARNING: Truststore password not set in environment variables");
+            truststorePassword = "clientpass"; 
+        }
+        
+        KeyStore trustStore = KeyStore.getInstance("JKS");
+        try (FileInputStream fis = new FileInputStream(truststorePath)) {
+            trustStore.load(fis, truststorePassword.toCharArray());
+        }
+        
+        TrustManagerFactory trustManagerFactory = TrustManagerFactory.getInstance(
+            TrustManagerFactory.getDefaultAlgorithm());
+        trustManagerFactory.init(trustStore);
+        
+        SSLContext sslContext = SSLContext.getInstance(PROTOCOL);
+        sslContext.init(null, trustManagerFactory.getTrustManagers(), new SecureRandom());
+        
+        return sslContext;
+    }
+
+    private String[] getStrongCipherSuites(String[] supportedCipherSuites) {
+        java.util.List<String> strongCiphers = new ArrayList<>();
+        for (String cipher : supportedCipherSuites) {
+            if (!cipher.contains("NULL") && 
+                !cipher.contains("anon") && 
+                !cipher.contains("DES") &&
+                !cipher.contains("RC4")) {
+                strongCiphers.add(cipher);
+            }
+        }
+        return strongCiphers.toArray(new String[0]);
     }
 
     private void handleInput(ActionEvent e) {
@@ -810,9 +865,9 @@ public class TimeClient {
     }
 
     private class ServerResponseHandler implements Runnable {
-        private final Socket socket;
+        private final SSLSocket socket;
 
-        public ServerResponseHandler(Socket socket) {
+        public ServerResponseHandler(SSLSocket socket) {
             this.socket = socket;
         }
 
