@@ -18,7 +18,7 @@ public class TimeClient {
     private Frame frame;
     private TextArea outputArea;
     private TextField inputField;
-    private Socket socket;
+    private SSLSocket socket;
     private PrintWriter writer;
     private boolean shouldReconnect = true;
     private String hostname;
@@ -417,6 +417,7 @@ public class TimeClient {
                     SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
                     
                     SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(hostname, port);
+                    this.socket = sslSocket;
                     sslSocket.setEnabledCipherSuites(getStrongCipherSuites(sslSocket.getSupportedCipherSuites()));
                     
                     sslSocket.startHandshake();
