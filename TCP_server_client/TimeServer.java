@@ -625,32 +625,28 @@ public class TimeServer {
 
     if (room == null) {
         writer.println("Error: Room not found.");
-        System.out.println("[ERROR]: Room not found.");
+        System.out.println("[ERROR]: Room not found for ID: " + roomId);
         c.setState(ClientState.NOT_IN_ROOM);
         return;
     }
 
     try {
+        CountDownLatch displayLatch = new CountDownLatch(1);
         while (true) {
-            outputPrints.cleanClientTerminal(writer);
-            writer.println("=== Room: " + room.getName() + " ===");
-            writer.println("Members: " + room.getNumberOfMembers() + "/" + 
-                (room.getMaxNumberOfMembers() == -1 ? "∞" : room.getMaxNumberOfMembers()));
-            writer.println("Type your message or commands (/exit to leave):");
-            writer.println("----------------------------------------");
+            displayLatch.countDown(); // Reset latch for next iteration
+            displayLatch = new CountDownLatch(1);
             
-            // Display messages
-            for (Message msg : room.getMessages()) {
-                writer.println(msg.toString());
-            }
-            writer.println("----------------------------------------");
+            // Display room state
+            displayRoomState(room, writer);
             
+            // Read and process input
             Package pkg = Package.readInput(reader);
             if (pkg == null) continue;
             
             String message = pkg.getMessage();
             if (message == null || message.trim().isEmpty()) continue;
 
+            // Handle commands
             if (message.equals("/quit") || message.equals("/exit")) {
                 lock.lock();
                 try {
@@ -666,52 +662,119 @@ public class TimeServer {
                 handleDisconnect(c, sockClient);
                 return;
             } else {
+                // Handle regular messages
                 lock.lock();
                 try {
                     Message newMessage = new Message(c.getName(), message);
                     room.addMessage(newMessage);
                     System.out.println("[DEBUG] Added message to room " + room.getName() + ": " + newMessage);
                     
-                    // Process AI response if it's an AI room
                     if (room.getIsAi()) {
-                        processAIResponseAsync(room, message);
+                        // Process AI response
+                        processAIResponseAsync(room, message, displayLatch);
+                        
+                        // Wait for AI response with timeout
+                        if (!displayLatch.await(5, TimeUnit.SECONDS)) {
+                            System.out.println("[WARN] AI response timeout");
+                        }
+                        
+                        // Force refresh display after AI response
+                        displayRoomState(room, writer);
                     }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    System.err.println("[ERROR] AI response interrupted: " + e.getMessage());
                 } finally {
                     lock.unlock();
                 }
             }
         }
-    } finally {
-        outputPrints.cleanClientTerminal(writer);
+    } catch (Exception e) {
+        System.err.println("[ERROR] Room error: " + e.getMessage());
+        e.printStackTrace();
     }
 }
 
-    private void processAIResponseAsync(Room room, String userMessage) {
-        System.out.println("[INFO]: Processing asynchronous AI response for message: " + userMessage);
+private void displayRoomState(Room room, PrintWriter writer) {
+    outputPrints.cleanClientTerminal(writer);
+    writer.println("=== Room: " + room.getName() + " ===");
+    writer.println("Members: " + room.getNumberOfMembers() + "/" + 
+        (room.getMaxNumberOfMembers() == -1 ? "∞" : room.getMaxNumberOfMembers()));
+    writer.println("Type your message or commands (/exit to leave):");
+    writer.println("----------------------------------------");
+    
+    lock.lock();
+    try {
+        for (Message msg : room.getMessages()) {
+            writer.println(msg.toString());
+        }
+    } finally {
+        lock.unlock();
+    }
+    writer.println("----------------------------------------");
+}
+
+    private void processAIResponseAsync(Room room, String userMessage, CountDownLatch responseLatch) {
+    System.out.println("[INFO]: Processing asynchronous AI response for message: " + userMessage);
+    
+    final String messageId = UUID.randomUUID().toString();
+    final Map<String, Boolean> processed = new ConcurrentHashMap<>();
+    processed.put(messageId, false);
+
+    lock.lock();
+    try {
+        room.addMessage(new Message("System", "Processing AI response..."));
+    } finally {
+        lock.unlock();
+    }
+
+    CompletableFuture.runAsync(() -> {
         AIIntegration.processMessageAsync(userMessage, room.getMessages(), new AIIntegration.AIResponseCallback() {
             @Override
             public void onResponseReceived(String response, String originalMessage) {
-                lock.lock();
-                try {
-                    room.addMessage(new Message("AI Bot", response));
-                    System.out.println("[INFO]: Async AI response added to room " + room.getId());
-                } finally {
-                    lock.unlock();
+                if (!processed.getOrDefault(messageId, false)) {
+                    lock.lock();
+                    try {
+                        List<Message> messages = room.getMessages();
+                        messages.removeIf(msg -> msg.getAuthor().equals("System") && 
+                                               msg.getContent().equals("Processing AI response..."));
+                        
+                        room.addMessage(new Message("AI Bot", response));
+                        processed.put(messageId, true);
+                        System.out.println("[INFO]: AI response added for message: " + originalMessage);
+                    } finally {
+                        lock.unlock();
+                        responseLatch.countDown(); // Signal response received
+                    }
                 }
             }
             
             @Override
             public void onError(String errorMessage, String originalMessage) {
-                lock.lock();
-                try {
-                    room.addMessage(new Message("AI Bot", "Sorry, I couldn't process that request: " + errorMessage));
-                    System.err.println("[ERROR]: Async AI response failed: " + errorMessage);
-                } finally {
-                    lock.unlock();
+                if (!processed.getOrDefault(messageId, false)) {
+                    lock.lock();
+                    try {
+                        List<Message> messages = room.getMessages();
+                        messages.removeIf(msg -> msg.getAuthor().equals("System") && 
+                                               msg.getContent().equals("Processing AI response..."));
+                        
+                        room.addMessage(new Message("System", "AI Error: " + errorMessage));
+                        processed.put(messageId, true);
+                    } finally {
+                        lock.unlock();
+                        responseLatch.countDown(); // Signal response received
+                    }
                 }
             }
         });
-    }
+    }).exceptionally(throwable -> {
+        System.err.println("[ERROR] Async processing failed: " + throwable.getMessage());
+        throwable.printStackTrace();
+        responseLatch.countDown(); // Ensure latch is released on error
+        return null;
+    });
+}
+    
 
     private void handleRoomCreation(BufferedReader reader, PrintWriter writer, Client c) {
         outputPrints.cleanClientTerminal(writer);
