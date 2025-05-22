@@ -44,15 +44,14 @@ public class TimeServer {
         new TimeServer(port).start();
     }
 
-    // NEW: Token validation method
-    private Client validateToken(String token) {
-        if (token == null || token.isEmpty()) {
-            return null;
+    private boolean validateTokenForClient(String token, Client client) {
+        if (token == null || token.isEmpty() || client == null) {
+            return false;
         }
         
         Map<String, String[]> tokenRecords = utils.readTokens();
         if (!tokenRecords.containsKey(token)) {
-            return null;
+            return false;
         }
         
         String[] tokenData = tokenRecords.get(token);
@@ -60,25 +59,20 @@ public class TimeServer {
         String name = tokenData[1];
         String timestamp = tokenData[2];
         
-        // Check if token is expired
+        if (client.getId() != Integer.parseInt(userId) || !client.getName().equals(name)) {
+            return false;
+        }
+        
         long currentTime = System.currentTimeMillis() / 1000L;
         if (currentTime > Long.parseLong(timestamp)) {
             System.out.println("[INFO] Token expired for user: " + name);
-            utils.removeToken(userId, name); // Clean up expired token
-            return null;
+            utils.removeToken(userId, name); 
+            return false;
         }
         
-        // Find client by ID
-        for (Client client : clients) {
-            if (client.getId() == Integer.parseInt(userId)) {
-                return client;
-            }
-        }
-        
-        return null;
+        return true;
     }
 
-    // NEW: Send error response for invalid token
     private void sendTokenError(PrintWriter writer, String message) {
         Model.Package errorPackage = new Package("TOKEN_ERROR: " + message, "");
         writer.println(errorPackage.serialize());
@@ -148,7 +142,7 @@ public class TimeServer {
                         showRoom(c, sockClient, c.getRoomId(), reader, writer);
                     }
                     if(c == null) {
-                        break; // Exit if authentication failed
+                        break; 
                     }
             }
             } catch (IOException e) {
@@ -208,7 +202,6 @@ public class TimeServer {
             return c;
     }
 
-    // MODIFIED: Add token validation to all user inputs
     private void showMainHub(Client c, Socket sockClient) throws IOException {
         Room testRoom = new Room(rooms.size(),"TestRoom", 5, false); // name: TestRoom, max 5 members, not AI
         rooms.add(testRoom);
@@ -230,13 +223,10 @@ public class TimeServer {
 
             writer.println("To join a room, type: /join <room number> or /create to create a room.");
             
-            // MODIFIED: Read input with token validation
             Model.Package inputPackage = readInput(reader);
             if (inputPackage == null) continue;
             
-            // Validate token for every input
-            Client validatedClient = validateToken(inputPackage.getToken());
-            if (validatedClient == null || validatedClient.getId() != c.getId()) {
+            if (!validateTokenForClient(inputPackage.getToken(), c)) {
                 sendTokenError(writer, "Invalid or expired token. Please re-authenticate.");
                 c.setState(ClientState.LOGGED_OUT);
                 return;
@@ -290,7 +280,6 @@ public class TimeServer {
         }
     }
 
-    // MODIFIED: Add token validation to room interactions
     private void showRoom(Client c, Socket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
         Room room = null;
         lock.lock();
@@ -317,13 +306,10 @@ public class TimeServer {
                 outputPrints.cleanClientTerminal(writer);
                 outputPrints.viewRoom(room, writer);
                 
-                // MODIFIED: Read input with package to get token
                 Model.Package inputPackage = readInputWithDelay(reader, 1000);
                 
                 if (inputPackage != null) {
-                    // Validate token for every room interaction
-                    Client validatedClient = validateToken(inputPackage.getToken());
-                    if (validatedClient == null || validatedClient.getId() != c.getId()) {
+                    if (!validateTokenForClient(inputPackage.getToken(), c)) {
                         sendTokenError(writer, "Invalid or expired token. Please re-authenticate.");
                         c.setState(ClientState.LOGGED_OUT);
                         break;
@@ -368,7 +354,6 @@ public class TimeServer {
         }
     }
 
-    // MODIFIED: Token-aware room creation
     private void handleRoomCreation(BufferedReader reader, PrintWriter writer, Client c) {
         outputPrints.cleanClientTerminal(writer);
         writer.println("=== Create a New Room ===");
@@ -380,9 +365,7 @@ public class TimeServer {
             Model.Package inputPackage = readInput(reader);
             if (inputPackage == null) continue;
             
-            // Validate token
-            Client validatedClient = validateToken(inputPackage.getToken());
-            if (validatedClient == null || validatedClient.getId() != c.getId()) {
+            if (!validateTokenForClient(inputPackage.getToken(), c)) {
                 sendTokenError(writer, "Invalid or expired token. Please re-authenticate.");
                 return;
             }
@@ -409,9 +392,7 @@ public class TimeServer {
             Model.Package inputPackage = readInput(reader);
             if (inputPackage == null) continue;
             
-            // Validate token
-            Client validatedClient = validateToken(inputPackage.getToken());
-            if (validatedClient == null || validatedClient.getId() != c.getId()) {
+            if (!validateTokenForClient(inputPackage.getToken(), c)) {
                 sendTokenError(writer, "Invalid or expired token. Please re-authenticate.");
                 return;
             }
@@ -442,9 +423,7 @@ public class TimeServer {
             Model.Package inputPackage = readInput(reader);
             if (inputPackage == null) continue;
             
-            // Validate token
-            Client validatedClient = validateToken(inputPackage.getToken());
-            if (validatedClient == null || validatedClient.getId() != c.getId()) {
+            if (!validateTokenForClient(inputPackage.getToken(), c)) {
                 sendTokenError(writer, "Invalid or expired token. Please re-authenticate.");
                 return;
             }
@@ -484,7 +463,6 @@ public class TimeServer {
         return;
     }
 
-    // NEW: Modified input reading with delay that returns Package
     private Model.Package readInputWithDelay(BufferedReader reader, int delay) {
         long startTime = System.currentTimeMillis(); 
         Model.Package response = null;
@@ -504,7 +482,6 @@ public class TimeServer {
         return response;
     }
 
-    // Keep existing methods unchanged
     private Model.Package getValidChoice(BufferedReader reader, PrintWriter writer) throws IOException {
         while (true) {
             Model.Package choice = readInput(reader);
