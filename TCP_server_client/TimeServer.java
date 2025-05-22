@@ -539,7 +539,8 @@ public class TimeServer {
     ScheduledFuture<?> updateTask = roomUpdateExecutor.scheduleAtFixedRate(() -> {
         if (c.getState() == ClientState.NOT_IN_ROOM && 
             c.getSocket() != null && 
-            !c.getSocket().isClosed()) {
+            !c.getSocket().isClosed() &&
+            c.getState() != ClientState.WAITING) {
             try {
                 lock.lock();
                 try {
@@ -861,88 +862,110 @@ private void displayRoomState(Room room, PrintWriter writer) {
     
 
     private void handleRoomCreation(BufferedReader reader, PrintWriter writer, Client c) {
-        outputPrints.cleanClientTerminal(writer);
-        writer.println("=== Create a New Room ===");
-        writer.println("Press 'q' at any time to cancel.\n");
+    // Set client state to WAITING to pause main hub updates
+    c.setState(ClientState.WAITING);
     
-        String name = null;
-        while (true) {
-            writer.println("Enter the room name: ");
-            name = readInput(reader).getMessage();
+    outputPrints.cleanClientTerminal(writer);
+    writer.println("=== Create a New Room ===");
+    writer.println("Press 'q' at any time to cancel.\n");
+    writer.flush();
 
-            if (name.equalsIgnoreCase("q")) {
-                writer.println("❌ Room creation cancelled.");
-                utils.safeSleep(500);
-                return;
-            }
+    String name = null;
+    while (true) {
+        writer.println("Enter the room name: ");
+        writer.flush();
+        name = readInput(reader).getMessage();
 
-            if (!name.isEmpty()) {
-                break;
-            }
-
-            writer.println("⚠️ Room name cannot be empty.");
+        if (name.equalsIgnoreCase("q")) {
+            writer.println("❌ Room creation cancelled.");
+            utils.safeSleep(500);
+            c.setState(ClientState.NOT_IN_ROOM); // Reset state
+            return;
         }
 
-        // 2. Is AI room? (y/n)
-        boolean isAiRoom = false;
-        while (true) {
-            writer.println("Is this an AI room? (y/n): ");
-            String aiResponse = readInput(reader).getMessage().toLowerCase();
+        if (!name.isEmpty()) {
+            break;
+        }
 
-            if (aiResponse.equals("q")) {
-                writer.println("❌ Room creation cancelled.");
-                utils.safeSleep(500);
-                return;
-            }
+        writer.println("⚠️ Room name cannot be empty.");
+    }
 
-            if (aiResponse.equals("y")) {
-                isAiRoom = true;
-                break;
-            } else if (aiResponse.equals("n")) {
-                isAiRoom = false;
+    // Clear screen between inputs
+    outputPrints.cleanClientTerminal(writer);
+    writer.println("=== Create a New Room ===");
+    writer.println("Room name: " + name + "\n");
+
+    // 2. Is AI room? (y/n)
+    boolean isAiRoom = false;
+    while (true) {
+        writer.println("Is this an AI room? (y/n): ");
+        writer.flush();
+        String aiResponse = readInput(reader).getMessage().toLowerCase();
+
+        if (aiResponse.equals("q")) {
+            writer.println("❌ Room creation cancelled.");
+            utils.safeSleep(500);
+            c.setState(ClientState.NOT_IN_ROOM); // Reset state
+            return;
+        }
+
+        if (aiResponse.equals("y")) {
+            isAiRoom = true;
+            break;
+        } else if (aiResponse.equals("n")) {
+            isAiRoom = false;
+            break;
+        } else {
+            writer.println("⚠️ Please enter 'y' or 'n'.");
+        }
+    }
+
+    // Clear screen between inputs
+    outputPrints.cleanClientTerminal(writer);
+    writer.println("=== Create a New Room ===");
+    writer.println("Room name: " + name);
+    writer.println("AI Room: " + (isAiRoom ? "Yes" : "No") + "\n");
+
+    // 3. Max members
+    int maxMembers;
+    while (true) {
+        writer.println("Max number of members (-1 for infinite): ");
+        writer.flush();
+        String input = readInput(reader).getMessage();
+
+        if (input.equalsIgnoreCase("q")) {
+            writer.println("❌ Room creation cancelled.");
+            c.setState(ClientState.NOT_IN_ROOM); // Reset state
+            return;
+        }
+
+        try {
+            maxMembers = Integer.parseInt(input);
+            if (maxMembers == -1 || maxMembers > 0) {
                 break;
             } else {
-                writer.println("⚠️ Please enter 'y' or 'n'.");
+                writer.println("⚠️ Please enter -1 or a positive number.");
             }
+        } catch (NumberFormatException e) {
+            writer.println("⚠️ Please enter a valid number.");
         }
-
-        // 3. Max members
-        int maxMembers;
-        while (true) {
-            writer.println("Max number of members (-1 for infinite): ");
-            String input = readInput(reader).getMessage();
-
-            if (input.equalsIgnoreCase("q")) {
-                writer.println("❌ Room creation cancelled.");
-                return;
-            }
-
-            try {
-                maxMembers = Integer.parseInt(input);
-                if (maxMembers == -1 || maxMembers > 0) {
-                    break;
-                } else {
-                    writer.println("⚠️ Please enter -1 or a positive number.");
-                }
-            } catch (NumberFormatException e) {
-                writer.println("⚠️ Please enter a valid number.");
-            }
-        }
-
-        // 4. Create room
-        lock.lock();
-        try {
-            int roomId = rooms.size();
-            Room r = new Room(roomId, name, maxMembers, isAiRoom);
-            rooms.add(r);
-            System.out.println("[INFO]: " + c.getName() + " created " + r.getName());
-        } finally {
-            lock.unlock();
-        }
-       
-        writer.println("\n✅ Room created successfully!");
-        utils.safeSleep(500);
     }
+
+    // 4. Create room
+    lock.lock();
+    try {
+        int roomId = rooms.size();
+        Room r = new Room(roomId, name, maxMembers, isAiRoom);
+        rooms.add(r);
+        System.out.println("[INFO]: " + c.getName() + " created " + r.getName());
+    } finally {
+        lock.unlock();
+    }
+   
+    writer.println("\n✅ Room created successfully!");
+    utils.safeSleep(1000); // Increased delay for better visibility
+    c.setState(ClientState.NOT_IN_ROOM); // Reset state
+}
 
     private String checkInputWithDelay(BufferedReader reader, int delay) { //Provides a way to refresh the client and not just wait for the input
         long startTime = System.currentTimeMillis();
