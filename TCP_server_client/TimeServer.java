@@ -496,93 +496,124 @@ public class TimeServer {
         }
     }
     
+    private void broadcastMainHubUpdate() {
+    lock.lock();
+    try {
+        for (Client client : clients) {
+            if (client.getState() == ClientState.NOT_IN_ROOM && 
+                client.getSocket() != null && 
+                !client.getSocket().isClosed()) {
+                try {
+                    PrintWriter writer = new PrintWriter(client.getSocket().getOutputStream(), true);
+                    outputPrints.cleanClientTerminal(writer);
+                    writer.println("Welcome to xchat! (Secured with TLS)");
+                    writer.println("\nRooms Available:");
+                
+                    for (int i = 0; i < rooms.size(); i++) {
+                        Room r = rooms.get(i);
+                        String roomInfo = (i + 1) + ". " + r.getName() + " [" + 
+                            r.getMembers().size() + "/" + r.getMaxNumberOfMembers() + "]";
+                        writer.println(roomInfo);
+                    }
+                    
+                    writer.println("\nTo join a room, type: /join <room number> or /create to create a room.");
+                } catch (IOException e) {
+                    System.err.println("[ERROR] Failed to update main hub for " + client.getName());
+                }
+            }
+        }
+    } finally {
+        lock.unlock();
+    }
+}
+
     private void showMainHub(Client c, SSLSocket sockClient) throws IOException {
     BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
-    PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
+    final PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
 
-    while (true) {
-        utils.safeSleep(500);
-        outputPrints.cleanClientTerminal(writer);
-        writer.println("Welcome to xchat! (Secured with TLS)");
+    // Set socket for broadcasting updates
+    c.setSocket(sockClient);
+    c.setState(ClientState.NOT_IN_ROOM);
 
-        writer.println("Rooms Available:");
-    
-        for (int i = 0; i < rooms.size(); i++) {
-            Room r = rooms.get(i);
-            String roomInfo = (i + 1) + ". " + r.getName() + " [" + r.getMembers().size() + "/" + r.getMaxNumberOfMembers() + "]";
-            writer.println(roomInfo);
-        }
-
-        writer.println("To join a room, type: /join <room number> or /create to create a room.");
-        
-        Package pkg = Package.readInput(reader);
-        if (pkg == null) continue;
-        
-        String input = pkg.getMessage();
-        if (input == null) continue;
-
-        // Debug output
-        System.out.println("[DEBUG] Received command: " + input);
-
-        if (!input.startsWith("/join")) {
-            if (handleMainHubCommand(input, c, reader, writer, sockClient)) {
-                return;
-            }
-            continue;
-        }
-
-        String[] parts = input.split("\\s+");
-        if (parts.length < 2) {
-            writer.println("Missing room number. Usage: /join <room number>");
-            continue;
-        }
-
-        int choice;
-        try {
-            choice = Integer.parseInt(parts[1]) - 1;
-            if (choice < 0 || choice >= rooms.size()) {
-                writer.println("Invalid room number. Please choose between 1 and " + rooms.size());
-                continue;
-            }
-
-            Room selectedRoom = rooms.get(choice);
-            lock.lock();
+    // Schedule periodic main hub updates
+    ScheduledFuture<?> updateTask = roomUpdateExecutor.scheduleAtFixedRate(() -> {
+        if (c.getState() == ClientState.NOT_IN_ROOM && 
+            c.getSocket() != null && 
+            !c.getSocket().isClosed()) {
             try {
-                if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers() 
-                    && selectedRoom.getMaxNumberOfMembers() != -1) {
-                    writer.println("That room is full. Please choose another one.");
+                lock.lock();
+                try {
+                    outputPrints.cleanClientTerminal(writer);
+                    writer.println("Welcome to xchat! (Secured with TLS)");
+                    writer.println("\nRooms Available:");
+                
+                    for (int i = 0; i < rooms.size(); i++) {
+                        Room r = rooms.get(i);
+                        String roomInfo = (i + 1) + ". " + r.getName() + " [" + 
+                            r.getMembers().size() + "/" + 
+                            (r.getMaxNumberOfMembers() == -1 ? "∞" : r.getMaxNumberOfMembers()) + "]";
+                        writer.println(roomInfo);
+                    }
+                    
+                    writer.println("\nTo join a room, type: /join <room number> or /create to create a room.");
+                } finally {
+                    lock.unlock();
+                }
+            } catch (Exception e) {
+                System.err.println("[ERROR] Failed to send periodic main hub update to " + 
+                    c.getName() + ": " + e.getMessage());
+            }
+        }
+    }, 0, 2, TimeUnit.SECONDS);
+
+    try {
+        while (true) {
+            Package pkg = Package.readInput(reader);
+            if (pkg == null) continue;
+            
+            String input = pkg.getMessage();
+            if (input == null) continue;
+
+            if (input.startsWith("/join")) {
+                String[] parts = input.split(" ");
+                if (parts.length != 2) {
+                    writer.println("Invalid command format. Use: /join <room number>");
                     continue;
                 }
 
-                // Remove from previous room if any
-                if (c.getRoomId() != -1) {
-                    for (Room r : rooms) {
-                        if (r.getId() == c.getRoomId()) {
-                            r.removeMember(c);
-                            break;
+                try {
+                    int roomIndex = Integer.parseInt(parts[1]) - 1;
+                    lock.lock();
+                    try {
+                        if (roomIndex >= 0 && roomIndex < rooms.size()) {
+                            Room selectedRoom = rooms.get(roomIndex);
+                            if (selectedRoom.addMember(c)) {
+                                c.setRoom(selectedRoom.getId());
+                                c.setState(ClientState.IN_ROOM);
+                                broadcastMainHubUpdate(); // Update main hub for other users
+                                updateTask.cancel(false); // Stop main hub updates for this client
+                                return;
+                            } else {
+                                writer.println("Cannot join room - room might be full");
+                            }
+                        } else {
+                            writer.println("Invalid room number");
                         }
+                    } finally {
+                        lock.unlock();
                     }
+                } catch (NumberFormatException e) {
+                    writer.println("Invalid room number format");
                 }
-
-                selectedRoom.addMember(c);
-                c.setRoom(selectedRoom.getId());
-                c.setState(ClientState.IN_ROOM);
-
-                // Send confirmation to client
-                writer.println("✅ Joined room: " + selectedRoom.getName());
-                System.out.println("[INFO]: " + c.getName() + " joined " + selectedRoom.getName());
-
-                // Break the loop to move to showRoom
+            } else if (handleMainHubCommand(input, c, reader, writer, sockClient)) {
+                updateTask.cancel(false);
                 return;
-
-            } finally {
-                lock.unlock();
             }
-            
-        } catch (NumberFormatException e) {
-            writer.println("Invalid room number. Please enter a valid number.");
-            continue;
         }
+    } catch (IOException e) {
+        System.err.println("[ERROR] Main hub error for " + c.getName() + ": " + e.getMessage());
+    } finally {
+        updateTask.cancel(false);
     }
 }
 
@@ -631,15 +662,16 @@ public class TimeServer {
             if (member.getSocket() != null && !member.getSocket().isClosed()) {
                 try {
                     PrintWriter memberWriter = new PrintWriter(member.getSocket().getOutputStream(), true);
-                    // Clear screen and reposition cursor
                     outputPrints.cleanClientTerminal(memberWriter);
-                    // Display room state
                     displayRoomState(room, memberWriter);
                 } catch (IOException e) {
-                    System.err.println("[ERROR] Failed to send update to member " + member.getName() + ": " + e.getMessage());
+                    System.err.println("[ERROR] Failed to send update to member " + 
+                        member.getName() + ": " + e.getMessage());
                 }
             }
         }
+        // Broadcast main hub update when room state changes
+        broadcastMainHubUpdate();
     } finally {
         lock.unlock();
     }
