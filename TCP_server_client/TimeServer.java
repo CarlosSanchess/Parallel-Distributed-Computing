@@ -26,17 +26,31 @@ public class TimeServer {
     private final ExecutorService virtualThreadExecutor = 
         Executors.newVirtualThreadPerTaskExecutor();
     private int nextClientId;
+    private final ScheduledExecutorService roomUpdateExecutor = Executors.newScheduledThreadPool(1);
+
 
     private static final String KEY_MANAGER_ALGORITHM = KeyManagerFactory.getDefaultAlgorithm();
     private static final String TRUST_MANAGER_ALGORITHM = TrustManagerFactory.getDefaultAlgorithm();
     private static final String PROTOCOL = "TLSv1.3"; 
 
     public TimeServer(int port) {
-        this.rooms = new ArrayList<>();
-        this.port = port;
-        this.clients = new ArrayList<>();
-        initializeNextClientId();
-    }
+    this.rooms = new ArrayList<>();
+    this.port = port;
+    this.clients = new ArrayList<>();
+    initializeNextClientId();
+
+    // Shutdown hook for the room update executor
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+        roomUpdateExecutor.shutdown();
+        try {
+            if (!roomUpdateExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                roomUpdateExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            roomUpdateExecutor.shutdownNow();
+        }
+    }));
+}
 
     private void initializeNextClientId() {
         nextClientId = utils.readLastId() + 1;
@@ -632,20 +646,22 @@ public class TimeServer {
 }
     
    private void showRoom(Client c, SSLSocket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
-    Room room = null;
+    final Room finalRoom;  // Make room reference final
     lock.lock();
     try {
+        Room room = null;
         for (Room r : rooms) {
             if (r.getId() == roomId) {
                 room = r;
                 break;
             }
         }
+        finalRoom = room;  // Assign to final variable
     } finally {
         lock.unlock();
     }
 
-    if (room == null) {
+    if (finalRoom == null) {
         writer.println("Error: Room not found.");
         System.out.println("[ERROR]: Room not found for ID: " + roomId);
         c.setState(ClientState.NOT_IN_ROOM);
@@ -655,15 +671,29 @@ public class TimeServer {
     // Set socket for broadcasting updates
     c.setSocket(sockClient);
     
-    // Display initial room state
-    outputPrints.cleanClientTerminal(writer);
-    displayRoomState(room, writer);
-    broadcastRoomUpdate(room);
+    final PrintWriter finalWriter = writer;  // Make writer reference final
+
+    // Schedule periodic room state updates
+    ScheduledFuture<?> updateTask = roomUpdateExecutor.scheduleAtFixedRate(() -> {
+        if (c.getSocket() != null && !c.getSocket().isClosed()) {
+            try {
+                lock.lock();
+                try {
+                    outputPrints.cleanClientTerminal(finalWriter);
+                    displayRoomState(finalRoom, finalWriter);
+                } finally {
+                    lock.unlock();
+                }
+            } catch (Exception e) {
+                System.err.println("[ERROR] Failed to send periodic update to " + c.getName() + ": " + e.getMessage());
+            }
+        }
+    }, 0, 2, TimeUnit.SECONDS);
 
     boolean running = true;
     while (running) {
         try {
-            Package pkg = Package.readInput(reader);  // This can throw IOException
+            Package pkg = Package.readInput(reader);
             if (pkg == null) continue;
             
             String message = pkg.getMessage();
@@ -672,11 +702,11 @@ public class TimeServer {
             if (message.equals("/quit") || message.equals("/exit")) {
                 lock.lock();
                 try {
-                    room.removeMember(c);
+                    finalRoom.removeMember(c);
                     c.leaveRoom();
                     c.setState(ClientState.NOT_IN_ROOM);
                     writer.println("You have left the room.");
-                    broadcastRoomUpdate(room);
+                    broadcastRoomUpdate(finalRoom);
                 } finally {
                     lock.unlock();
                 }
@@ -685,12 +715,12 @@ public class TimeServer {
                 lock.lock();
                 try {
                     Message newMessage = new Message(c.getName(), message);
-                    room.addMessage(newMessage);
-                    broadcastRoomUpdate(room);
+                    finalRoom.addMessage(newMessage);
+                    broadcastRoomUpdate(finalRoom);
 
-                    if (room.getIsAi()) {
+                    if (finalRoom.getIsAi()) {
                         CountDownLatch responseLatch = new CountDownLatch(1);
-                        processAIResponseAsync(room, message, responseLatch);
+                        processAIResponseAsync(finalRoom, message, responseLatch);
                         responseLatch.await(5, TimeUnit.SECONDS);
                     }
                 } catch (InterruptedException e) {
@@ -703,17 +733,19 @@ public class TimeServer {
             System.err.println("[ERROR] Room error: " + e.getMessage());
             lock.lock();
             try {
-                room.removeMember(c);
-                broadcastRoomUpdate(room);
+                finalRoom.removeMember(c);
+                broadcastRoomUpdate(finalRoom);
             } finally {
                 lock.unlock();
             }
             running = false;
         }
     }
-    c.setSocket(null); // Clear socket reference when leaving room
-}
 
+    // Cancel the periodic update task when leaving the room
+    updateTask.cancel(false);
+    c.setSocket(null);
+}
 
 private void displayRoomState(Room room, PrintWriter writer) {
     writer.println("=== Room: " + room.getName() + " ===");
