@@ -608,8 +608,30 @@ public class TimeServer {
                 return false; 
         }
     }
+
+    private void broadcastRoomUpdate(Room room) {
+    lock.lock();
+    try {
+        System.out.println("[DEBUG] Broadcasting room update to " + room.getMembers().size() + " members");
+        for (Client member : room.getMembers()) {
+            if (member.getSocket() != null && !member.getSocket().isClosed()) {
+                try {
+                    PrintWriter memberWriter = new PrintWriter(member.getSocket().getOutputStream(), true);
+                    // Clear screen and reposition cursor
+                    outputPrints.cleanClientTerminal(memberWriter);
+                    // Display room state
+                    displayRoomState(room, memberWriter);
+                } catch (IOException e) {
+                    System.err.println("[ERROR] Failed to send update to member " + member.getName() + ": " + e.getMessage());
+                }
+            }
+        }
+    } finally {
+        lock.unlock();
+    }
+}
     
-    private void showRoom(Client c, SSLSocket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
+   private void showRoom(Client c, SSLSocket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
     Room room = null;
     lock.lock();
     try {
@@ -630,77 +652,74 @@ public class TimeServer {
         return;
     }
 
-    try {
-        CountDownLatch displayLatch = new CountDownLatch(1);
-        while (true) {
-            displayLatch.countDown(); // Reset latch for next iteration
-            displayLatch = new CountDownLatch(1);
-            
-            // Display room state
-            displayRoomState(room, writer);
-            
-            // Read and process input
-            Package pkg = Package.readInput(reader);
+    // Set socket for broadcasting updates
+    c.setSocket(sockClient);
+    
+    // Display initial room state
+    outputPrints.cleanClientTerminal(writer);
+    displayRoomState(room, writer);
+    broadcastRoomUpdate(room);
+
+    boolean running = true;
+    while (running) {
+        try {
+            Package pkg = Package.readInput(reader);  // This can throw IOException
             if (pkg == null) continue;
             
             String message = pkg.getMessage();
             if (message == null || message.trim().isEmpty()) continue;
 
-            // Handle commands
             if (message.equals("/quit") || message.equals("/exit")) {
                 lock.lock();
                 try {
                     room.removeMember(c);
                     c.leaveRoom();
                     c.setState(ClientState.NOT_IN_ROOM);
+                    writer.println("You have left the room.");
+                    broadcastRoomUpdate(room);
                 } finally {
                     lock.unlock();
                 }
-                writer.println("You have left the room.");
-                break;
-            } else if (message.equals("/disconnect")) {
-                handleDisconnect(c, sockClient);
-                return;
+                running = false;
             } else {
-                // Handle regular messages
                 lock.lock();
                 try {
                     Message newMessage = new Message(c.getName(), message);
                     room.addMessage(newMessage);
-                    System.out.println("[DEBUG] Added message to room " + room.getName() + ": " + newMessage);
-                    
+                    broadcastRoomUpdate(room);
+
                     if (room.getIsAi()) {
-                        // Process AI response
-                        processAIResponseAsync(room, message, displayLatch);
-                        
-                        // Wait for AI response with timeout
-                        if (!displayLatch.await(5, TimeUnit.SECONDS)) {
-                            System.out.println("[WARN] AI response timeout");
-                        }
-                        
-                        // Force refresh display after AI response
-                        displayRoomState(room, writer);
+                        CountDownLatch responseLatch = new CountDownLatch(1);
+                        processAIResponseAsync(room, message, responseLatch);
+                        responseLatch.await(5, TimeUnit.SECONDS);
                     }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
-                    System.err.println("[ERROR] AI response interrupted: " + e.getMessage());
                 } finally {
                     lock.unlock();
                 }
             }
+        } catch (IOException e) {
+            System.err.println("[ERROR] Room error: " + e.getMessage());
+            lock.lock();
+            try {
+                room.removeMember(c);
+                broadcastRoomUpdate(room);
+            } finally {
+                lock.unlock();
+            }
+            running = false;
         }
-    } catch (Exception e) {
-        System.err.println("[ERROR] Room error: " + e.getMessage());
-        e.printStackTrace();
     }
+    c.setSocket(null); // Clear socket reference when leaving room
 }
 
+
 private void displayRoomState(Room room, PrintWriter writer) {
-    outputPrints.cleanClientTerminal(writer);
     writer.println("=== Room: " + room.getName() + " ===");
     writer.println("Members: " + room.getNumberOfMembers() + "/" + 
         (room.getMaxNumberOfMembers() == -1 ? "∞" : room.getMaxNumberOfMembers()));
-    writer.println("Type your message or commands (/exit to leave):");
+    writer.println("Type your message or commands (/quit to leave):");
     writer.println("----------------------------------------");
     
     lock.lock();
@@ -712,6 +731,7 @@ private void displayRoomState(Room room, PrintWriter writer) {
         lock.unlock();
     }
     writer.println("----------------------------------------");
+    writer.flush(); // Ensure all content is sent immediately
 }
 
     private void processAIResponseAsync(Room room, String userMessage, CountDownLatch responseLatch) {
@@ -907,7 +927,11 @@ private void displayRoomState(Room room, PrintWriter writer) {
     }
 
     private Model.Package readInput(BufferedReader reader) {
-        Model.Package p = Model.Package.readInput(reader);
-        return p;
+    try {
+        return Model.Package.readInput(reader);
+    } catch (IOException e) {
+        System.err.println("[ERROR] Failed to read input: " + e.getMessage());
+        return null;
     }
+}
 }

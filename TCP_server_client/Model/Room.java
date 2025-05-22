@@ -60,20 +60,22 @@ public class Room {
         return false;
     }
     
-    // Check if room is full
-    if (maxNumberOfMembers != -1 && members.size() >= maxNumberOfMembers) {
-        return false;
-    }
+    synchronized(members) {
+        // Check if room is full
+        if (maxNumberOfMembers != -1 && members.size() >= maxNumberOfMembers) {
+            return false;
+        }
 
-    // Check if member is already in room
-    if (members.contains(member)) {
-        return false;
-    }
+        // Check if member is already in room
+        if (members.contains(member)) {
+            return false;
+        }
 
-    // Add member
-    members.add(member);
-    System.out.println("[DEBUG] Added member " + member.getName() + " to room " + this.getName());
-    return true;
+        // Add member
+        members.add(member);
+        System.out.println("[DEBUG] Added member " + member.getName() + " to room " + this.getName());
+        return true;
+    }
 }
 
     public boolean removeMember(Client member) {

@@ -54,7 +54,7 @@ public class Package {
         }
     }
 
-    public static Package readInput(BufferedReader br) {
+    public static Package readInput(BufferedReader br) throws IOException {
         try {
             String line = br.readLine();
             if (line == null) {
