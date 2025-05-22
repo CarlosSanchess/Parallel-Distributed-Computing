@@ -30,9 +30,17 @@ public class outputPrints {
     }
     
    public static void viewRoom(Room room, PrintWriter writer) {
-  
-    writer.println(room.toString());
+    writer.println("=== Room: " + room.getName() + " ===");
+    writer.println("Members: " + room.getNumberOfMembers() + "/" + 
+        (room.getMaxNumberOfMembers() == -1 ? "∞" : room.getMaxNumberOfMembers()));
+    writer.println("----------------------------------------");
+    
+    // Display all messages
+    for (Message msg : room.getMessages()) {
+        writer.println(msg.toString());
     }
-
+    writer.println("----------------------------------------");
+    writer.println("Type your message or commands (/quit to leave):");
+}
  
 }

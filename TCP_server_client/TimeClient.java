@@ -2,12 +2,16 @@ import java.awt.*;
 import java.awt.event.*;
 import java.net.*;
 import java.security.KeyStore;
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.ArrayList;
+import java.util.List;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
+import javax.net.ssl.SSLSession;
+import javax.net.ssl.SSLException;
 import javax.net.ssl.TrustManagerFactory;
 
 import java.io.*;
@@ -34,7 +38,7 @@ public class TimeClient {
     private String currentRoomId = null;
     private Label roomNameLabel;
     private Label roomMembersLabel;
-    private List participantsList;
+    private java.awt.List participantsList;
     private boolean inRoom = false;
     private ScrollPane participantsScrollPane;
     
@@ -316,7 +320,7 @@ public class TimeClient {
         Label participantsHeaderLabel = new Label("Participants:", Label.LEFT);
         participantsHeaderLabel.setFont(defaultFont);
         
-        participantsList = new List(5, false); 
+        participantsList = new java.awt.List(5, false); 
         participantsList.setFont(defaultFont);
         participantsList.setBackground(Color.WHITE);
         
@@ -403,63 +407,113 @@ public class TimeClient {
         helpDialog.setVisible(true);
     }
 
-    private void connectToServer() {
-        connectButton.setEnabled(false);
-        
-        new Thread(() -> {
-            while (shouldReconnect) {
+private void connectToServer() {
+    connectButton.setEnabled(false);
+    
+    new Thread(() -> {
+        while (shouldReconnect) {
+            try {
+                EventQueue.invokeLater(() -> {
+                    statusLabel.setText("Status: Establishing secure connection...");
+                });
+                
+                SSLContext sslContext = createSSLContext();
+                SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
+                
+                // Create SSL socket with improved timeout handling
+                SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket();
+                sslSocket.connect(new InetSocketAddress(hostname, port), 5000);
+                
+                // Configure SSL parameters
+                sslSocket.setEnabledProtocols(new String[] {"TLSv1.3"});
+                sslSocket.setEnabledCipherSuites(getStrongCipherSuites(sslSocket.getSupportedCipherSuites()));
+                
+                // Enable session reuse
+                sslSocket.setEnableSessionCreation(true);
+                sslSocket.setUseClientMode(true);
+                
                 try {
-                    EventQueue.invokeLater(() -> {
-                        statusLabel.setText("Status: Connecting...");
-                    });
-                    
-                    SSLContext sslContext = createSSLContext();
-                    SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
-                    
-                    SSLSocket sslSocket = (SSLSocket) sslSocketFactory.createSocket(hostname, port);
-                    this.socket = sslSocket;
-                    sslSocket.setEnabledCipherSuites(getStrongCipherSuites(sslSocket.getSupportedCipherSuites()));
-                    
+                    // Start handshake with timeout
+                    sslSocket.setSoTimeout(5000);
                     sslSocket.startHandshake();
+                    sslSocket.setSoTimeout(0); // Reset timeout after handshake
                     
-                    writer = new PrintWriter(sslSocket.getOutputStream(), true);
+                    this.socket = sslSocket;
+                    writer = new PrintWriter(new BufferedWriter(
+                        new OutputStreamWriter(sslSocket.getOutputStream(), StandardCharsets.UTF_8)), true);
                     
                     new Thread(new ServerResponseHandler(sslSocket)).start();
                     
                     EventQueue.invokeLater(() -> {
-                        statusLabel.setText("Status: Connected");
+                        statusLabel.setText("Status: Connected (Secure)");
                         disconnectButton.setEnabled(true);
-                        appendToOutput("Securely connected to server at " + hostname + ":" + port);
+                        appendToOutput("Secure connection established (TLS 1.3)");
+                        appendToOutput("Using cipher: " + sslSocket.getSession().getCipherSuite());
                     });
                     break;
-                } catch (Exception ex) {
-                    final String errorMsg = ex.getMessage();
+                    
+                } catch (SocketTimeoutException e) {
+                    throw new IOException("SSL handshake timed out", e);
+                }
+                
+            } catch (Exception ex) {
+                final String errorMsg = ex.getMessage();
+                EventQueue.invokeLater(() -> {
+                    statusLabel.setText("Status: Connection failed");
+                    connectButton.setEnabled(true);
+                    disconnectButton.setEnabled(false);
+                    appendToOutput("Secure connection failed: " + errorMsg);
+                    appendToOutput("Retrying in 5 seconds... (Press Disconnect to cancel)");
+                });
+                
+                try {
+                    Thread.sleep(5000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                
+                if (!shouldReconnect) {
                     EventQueue.invokeLater(() -> {
-                        statusLabel.setText("Status: Connection failed");
+                        statusLabel.setText("Status: Disconnected");
                         connectButton.setEnabled(true);
-                        disconnectButton.setEnabled(false);
-                        appendToOutput("Secure connection failed: " + errorMsg);
-                        appendToOutput("Retrying in 5 seconds... (Press Disconnect to cancel)");
                     });
-                    
-                    try {
-                        Thread.sleep(5000);
-                    } catch (InterruptedException ie) {
-                        Thread.currentThread().interrupt();
-                        return;
-                    }
-                    
-                    if (!shouldReconnect) {
-                        EventQueue.invokeLater(() -> {
-                            statusLabel.setText("Status: Disconnected");
-                            connectButton.setEnabled(true);
-                        });
-                        return;
-                    }
+                    break;
                 }
             }
-        }).start();
+        }
+    }).start();
+}
+
+private String[] getStrongCipherSuites(String[] supportedCipherSuites) {
+    java.util.List<String> strongCiphers = new ArrayList<>();
+    for (String cipher : supportedCipherSuites) {
+        // Only use strong ciphers with forward secrecy
+        if (cipher.contains("TLS_AES_") || 
+            cipher.contains("TLS_CHACHA20_") ||
+            (cipher.contains("ECDHE") && !cipher.contains("NULL") && 
+             !cipher.contains("anon") && !cipher.contains("RC4") &&
+             !cipher.contains("DES"))) {
+            strongCiphers.add(cipher);
+        }
     }
+    return strongCiphers.toArray(new String[0]);
+}
+
+private void closeConnection() {
+    try {
+        if (socket != null) {
+            // Proper SSL session closure
+            socket.close();
+            SSLSession session = ((SSLSocket)socket).getSession();
+            session.invalidate();
+            socket = null;
+        }
+        writer = null;
+    } catch (IOException e) {
+        appendToOutput("Error closing secure connection: " + e.getMessage());
+    }
+}
 
     private SSLContext createSSLContext() throws Exception {
         String truststorePath = System.getenv(TRUSTSTORE_PATH_ENV);
@@ -486,19 +540,6 @@ public class TimeClient {
         sslContext.init(null, trustManagerFactory.getTrustManagers(), new SecureRandom());
         
         return sslContext;
-    }
-
-    private String[] getStrongCipherSuites(String[] supportedCipherSuites) {
-        java.util.List<String> strongCiphers = new ArrayList<>();
-        for (String cipher : supportedCipherSuites) {
-            if (!cipher.contains("NULL") && 
-                !cipher.contains("anon") && 
-                !cipher.contains("DES") &&
-                !cipher.contains("RC4")) {
-                strongCiphers.add(cipher);
-            }
-        }
-        return strongCiphers.toArray(new String[0]);
     }
 
     private void handleInput(ActionEvent e) {
@@ -853,74 +894,60 @@ public class TimeClient {
         }
     }
 
-    private void closeConnection() {
-        try {
-            if (socket != null && !socket.isClosed()) {
-                socket.close();
-                socket = null;
+
+    private void handleSSLException(SSLException e) {
+    EventQueue.invokeLater(() -> {
+        statusLabel.setText("Status: SSL Error");
+        appendToOutput("SSL/TLS error: " + e.getMessage());
+        appendToOutput("The connection is no longer secure.");
+        
+        // Force disconnect on SSL errors
+        disconnect();
+    });
+}
+
+private class ServerResponseHandler implements Runnable {
+    private final SSLSocket socket;
+    
+    public ServerResponseHandler(SSLSocket socket) {
+        this.socket = socket;
+    }
+    
+    @Override
+    public void run() {
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))) {
+            
+            Package serverResponse;
+            while ((serverResponse = Package.readInput(reader)) != null) {
+                String message = serverResponse.getMessage();
+                appendToOutput(message);
+                if (serverResponse.getToken() != null && serverResponse.getToken().length() > 1) {
+                    userToken = serverResponse.getToken();
+                }
             }
-            writer = null;
+            
+        } catch (SSLException e) {
+            handleSSLException(e);
         } catch (IOException e) {
-            appendToOutput("Error closing socket: " + e.getMessage());
-        }
-    }
-
-    private class ServerResponseHandler implements Runnable {
-        private final SSLSocket socket;
-
-        public ServerResponseHandler(SSLSocket socket) {
-            this.socket = socket;
-        }
-
-        @Override
-        public void run() {
-            try (BufferedReader reader = new BufferedReader(
-                    new InputStreamReader(socket.getInputStream()))) {
-                
-                Package serverResponse;
-                while ((serverResponse = Model.Package.readInput(reader)) != null) {
-                    System.out.println(serverResponse.getMessage());
-                    appendToOutput(serverResponse.getMessage());
-                    if(serverResponse.getToken() != null && serverResponse.getToken().length() > 1){
-                        userToken = serverResponse.getToken();
-                    }
-                }
-                
-                appendToOutput("Server has disconnected");
-                
-                EventQueue.invokeLater(() -> {
-                    statusLabel.setText("Status: Disconnected");
-                    connectButton.setEnabled(true);
-                    disconnectButton.setEnabled(false);
-                    isLoggedIn = false;
-                    currentUsername = null;
-                    leaveRoom(); 
-                });
-                
-                if (shouldReconnect) {
-                    appendToOutput("Attempting to reconnect...");
-                    connectToServer();
-                }
-                
-            } catch (IOException ex) {
-                EventQueue.invokeLater(() -> {
-                    statusLabel.setText("Status: Disconnected");
-                    connectButton.setEnabled(true);
-                    disconnectButton.setEnabled(false);
-                    isLoggedIn = false;
-                    currentUsername = null;
-                    leaveRoom(); 
-                });
-                
-                if (shouldReconnect) {
-                    appendToOutput("Connection lost. Attempting to reconnect...");
-                    connectToServer();
-                } else {
-                    appendToOutput("Error reading server response: " + ex.getMessage());
-                }
+            if (shouldReconnect) {
+                appendToOutput("Connection lost. Attempting to reconnect...");
+                connectToServer();
+            } else {
+                appendToOutput("Connection closed: " + e.getMessage());
             }
+        } finally {
+            EventQueue.invokeLater(() -> {
+                statusLabel.setText("Status: Disconnected");
+                connectButton.setEnabled(true);
+                disconnectButton.setEnabled(false);
+                isLoggedIn = false;
+                currentUsername = null;
+                leaveRoom();
+            });
         }
     }
+}
 
     private void disconnect(){
         shouldReconnect = false;

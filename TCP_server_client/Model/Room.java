@@ -56,13 +56,25 @@ public class Room {
     }
 
     public boolean addMember(Client member) {
-        if (members.size() < maxNumberOfMembers || maxNumberOfMembers != -1) {
-            members.add(member);
-            return true;
-        } else {
-            return false; 
-        }
+    if (member == null) {
+        return false;
     }
+    
+    // Check if room is full
+    if (maxNumberOfMembers != -1 && members.size() >= maxNumberOfMembers) {
+        return false;
+    }
+
+    // Check if member is already in room
+    if (members.contains(member)) {
+        return false;
+    }
+
+    // Add member
+    members.add(member);
+    System.out.println("[DEBUG] Added member " + member.getName() + " to room " + this.getName());
+    return true;
+}
 
     public boolean removeMember(Client member) {
         return members.remove(member);

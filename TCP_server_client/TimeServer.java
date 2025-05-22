@@ -483,73 +483,94 @@ public class TimeServer {
     }
     
     private void showMainHub(Client c, SSLSocket sockClient) throws IOException {
-        Room testRoom = new Room(rooms.size(),"TestRoom", 5, false); 
-        rooms.add(testRoom);
-        BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
-        PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
+    BufferedReader reader = new BufferedReader(new InputStreamReader(sockClient.getInputStream()));
+    PrintWriter writer = new PrintWriter(sockClient.getOutputStream(), true);
+
+    while (true) {
+        utils.safeSleep(500);
+        outputPrints.cleanClientTerminal(writer);
+        writer.println("Welcome to xchat! (Secured with TLS)");
+
+        writer.println("Rooms Available:");
     
-        while (true) {
-            utils.safeSleep(500);
-            outputPrints.cleanClientTerminal(writer);
-            writer.println("Welcome to xchat! (Secured with TLS)");
-    
-            writer.println("Rooms Available:");
+        for (int i = 0; i < rooms.size(); i++) {
+            Room r = rooms.get(i);
+            String roomInfo = (i + 1) + ". " + r.getName() + " [" + r.getMembers().size() + "/" + r.getMaxNumberOfMembers() + "]";
+            writer.println(roomInfo);
+        }
+
+        writer.println("To join a room, type: /join <room number> or /create to create a room.");
         
-            for (int i = 0; i < rooms.size(); i++) {
-                Room r = rooms.get(i);
-                String roomInfo = (i + 1) + ". " + r.getName() + " [" + r.getMembers().size() + "/" + r.getMaxNumberOfMembers() + "]";
-                writer.println(roomInfo);
-            }
+        Package pkg = Package.readInput(reader);
+        if (pkg == null) continue;
+        
+        String input = pkg.getMessage();
+        if (input == null) continue;
 
-            writer.println("To join a room, type: /join <room number> or /create to create a room.");
-            String input = checkInputWithDelay(reader, 1000);
-            if(input == null){continue;}
+        // Debug output
+        System.out.println("[DEBUG] Received command: " + input);
 
+        if (!input.startsWith("/join")) {
             if (handleMainHubCommand(input, c, reader, writer, sockClient)) {
                 return;
             }
+            continue;
+        }
 
-            String[] parts = input.split("\\s+");
-            if (parts.length < 2) {
-                writer.println("Missing room number. Usage: /join <room number>");
-                continue;
-            }
+        String[] parts = input.split("\\s+");
+        if (parts.length < 2) {
+            writer.println("Missing room number. Usage: /join <room number>");
+            continue;
+        }
 
-            int choice;
-            try {
-                choice = Integer.parseInt(parts[1]) - 1;
-            } catch (NumberFormatException e) {
-                writer.println("Invalid room number. Please enter a valid number after /join.");
-                continue;
-            }
-
+        int choice;
+        try {
+            choice = Integer.parseInt(parts[1]) - 1;
             if (choice < 0 || choice >= rooms.size()) {
-                writer.println("No room with that number. Please choose a valid room.");
+                writer.println("Invalid room number. Please choose between 1 and " + rooms.size());
                 continue;
             }
-            
+
+            Room selectedRoom = rooms.get(choice);
             lock.lock();
             try {
-                Room selectedRoom = rooms.get(choice);
-
-                if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers()) {
-                    writer.println("That room is full. Please choose another one:");
+                if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers() 
+                    && selectedRoom.getMaxNumberOfMembers() != -1) {
+                    writer.println("That room is full. Please choose another one.");
                     continue;
                 }
-                
+
+                // Remove from previous room if any
+                if (c.getRoomId() != -1) {
+                    for (Room r : rooms) {
+                        if (r.getId() == c.getRoomId()) {
+                            r.removeMember(c);
+                            break;
+                        }
+                    }
+                }
+
                 selectedRoom.addMember(c);
                 c.setRoom(selectedRoom.getId());
+                c.setState(ClientState.IN_ROOM);
 
+                // Send confirmation to client
                 writer.println("✅ Joined room: " + selectedRoom.getName());
                 System.out.println("[INFO]: " + c.getName() + " joined " + selectedRoom.getName());
-                c.setState(ClientState.IN_ROOM);
+
+                // Break the loop to move to showRoom
+                return;
+
             } finally {
                 lock.unlock();
             }
-    
-            break;
+            
+        } catch (NumberFormatException e) {
+            writer.println("Invalid room number. Please enter a valid number.");
+            continue;
         }
     }
+}
 
     private boolean handleMainHubCommand(String input, Client c, BufferedReader reader, PrintWriter writer, SSLSocket sockClient) throws IOException {
         switch (input) {
@@ -589,69 +610,81 @@ public class TimeServer {
     }
     
     private void showRoom(Client c, SSLSocket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
-        Room room = null;
-        lock.lock();
-        try {
-            for (Room r : rooms) {
-                if (r.getId() == roomId) {
-                    room = r;
-                    break;
-                }
+    Room room = null;
+    lock.lock();
+    try {
+        for (Room r : rooms) {
+            if (r.getId() == roomId) {
+                room = r;
+                break;
             }
-        } finally {
-            lock.unlock();
         }
-
-        if (room == null) {
-            writer.println("Error: Room not found.");
-            System.out.println("[ERROR]: Room not found.");
-            c.setState(ClientState.NOT_IN_ROOM);
-            return;
-        }
-
-        try {
-            while (true) {
-                outputPrints.cleanClientTerminal(writer);
-                outputPrints.viewRoom(room, writer);
-                
-                String response = checkInputWithDelay(reader, 1000);
-                
-                if (response != null) {
-                    if (response.equals("/quit") || response.equals("/exit")) {
-                        lock.lock();
-                        try {
-                            c.setRoom(-1);
-                            c.setState(ClientState.NOT_IN_ROOM); 
-                            room.removeMember(c);
-                        } finally {
-                            lock.unlock();
-                        }
-                        writer.println("You have left the room.");
-                        break;
-                    } else {
-                        if(response.equals("/disconnect")) {
-                            handleDisconnect(c, sockClient);
-                            break;
-                        }
-                        lock.lock();
-                        try {
-                            Message userMessage = new Message(c.getName(), response);
-                            room.addMessage(userMessage);
-                            System.out.println("[INFO]: " + c.getName() + " sent message in room " + roomId);
-                            
-                            if(room.getIsAi()) {
-                                processAIResponseAsync(room, response);
-                            }
-                        } finally {
-                            lock.unlock();
-                        }
-                    }
-                }
-            }
-        } finally {
-            outputPrints.cleanClientTerminal(writer);
-        }
+    } finally {
+        lock.unlock();
     }
+
+    if (room == null) {
+        writer.println("Error: Room not found.");
+        System.out.println("[ERROR]: Room not found.");
+        c.setState(ClientState.NOT_IN_ROOM);
+        return;
+    }
+
+    try {
+        while (true) {
+            outputPrints.cleanClientTerminal(writer);
+            writer.println("=== Room: " + room.getName() + " ===");
+            writer.println("Members: " + room.getNumberOfMembers() + "/" + 
+                (room.getMaxNumberOfMembers() == -1 ? "∞" : room.getMaxNumberOfMembers()));
+            writer.println("Type your message or commands (/exit to leave):");
+            writer.println("----------------------------------------");
+            
+            // Display messages
+            for (Message msg : room.getMessages()) {
+                writer.println(msg.toString());
+            }
+            writer.println("----------------------------------------");
+            
+            Package pkg = Package.readInput(reader);
+            if (pkg == null) continue;
+            
+            String message = pkg.getMessage();
+            if (message == null || message.trim().isEmpty()) continue;
+
+            if (message.equals("/quit") || message.equals("/exit")) {
+                lock.lock();
+                try {
+                    room.removeMember(c);
+                    c.leaveRoom();
+                    c.setState(ClientState.NOT_IN_ROOM);
+                } finally {
+                    lock.unlock();
+                }
+                writer.println("You have left the room.");
+                break;
+            } else if (message.equals("/disconnect")) {
+                handleDisconnect(c, sockClient);
+                return;
+            } else {
+                lock.lock();
+                try {
+                    Message newMessage = new Message(c.getName(), message);
+                    room.addMessage(newMessage);
+                    System.out.println("[DEBUG] Added message to room " + room.getName() + ": " + newMessage);
+                    
+                    // Process AI response if it's an AI room
+                    if (room.getIsAi()) {
+                        processAIResponseAsync(room, message);
+                    }
+                } finally {
+                    lock.unlock();
+                }
+            }
+        }
+    } finally {
+        outputPrints.cleanClientTerminal(writer);
+    }
+}
 
     private void processAIResponseAsync(Room room, String userMessage) {
         System.out.println("[INFO]: Processing asynchronous AI response for message: " + userMessage);
