@@ -802,50 +802,61 @@ private void displayRoomState(Room room, PrintWriter writer) {
 }
 
     private void processAIResponseSync(Room room, String message) {
-    Object lock = new Object();
+    ReentrantLock lock = new ReentrantLock();
+    Condition done = lock.newCondition();
     boolean[] completed = {false};
-    
+
     Thread responseThread = Thread.ofVirtual().unstarted(() -> {
         try {
             AIIntegration.processMessageAsync(message, room.getMessages(), new AIIntegration.AIResponseCallback() {
                 @Override
                 public void onResponseReceived(String response, String originalMessage) {
-                    synchronized(lock) {
+                    lock.lock();
+                    try {
                         room.addMessage(new Message("AI Assistant", response));
                         broadcastRoomUpdate(room);
                         completed[0] = true;
-                        lock.notify();
+                        done.signal();
+                    } finally {
+                        lock.unlock();
                     }
                 }
-                
+
                 @Override
                 public void onError(String errorMessage, String originalMessage) {
-                    synchronized(lock) {
+                    lock.lock();
+                    try {
                         room.addMessage(new Message("System", "Error: " + errorMessage));
                         broadcastRoomUpdate(room);
                         completed[0] = true;
-                        lock.notify();
+                        done.signal();
+                    } finally {
+                        lock.unlock();
                     }
                 }
             });
         } catch (Exception e) {
-            synchronized(lock) {
+            lock.lock();
+            try {
                 completed[0] = true;
-                lock.notify();
+                done.signal();
+            } finally {
+                lock.unlock();
             }
         }
     });
-    
+
     responseThread.start();
-    
-    synchronized(lock) {
-        try {
-            if (!completed[0]) {
-                lock.wait(5000); // Wait up to 5 seconds
-            }
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
+
+    lock.lock();
+    try {
+        if (!completed[0]) {
+            done.awaitNanos(5_000_000_000L); // Wait up to 5 seconds
         }
+    } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+    } finally {
+        lock.unlock();
     }
 }
     
