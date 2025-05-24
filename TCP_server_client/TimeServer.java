@@ -261,7 +261,7 @@ public class TimeServer {
                 lock.lock();
                     Room selectedRoom = rooms.get(choice);
 
-                    if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers()) {
+                    if (selectedRoom.getMembers().size() >= selectedRoom.getMaxNumberOfMembers() && selectedRoom.getMaxNumberOfMembers() != -1) {
                         writer.println("That room is full. Please choose another one:");
                         lock.unlock();
                         continue;
