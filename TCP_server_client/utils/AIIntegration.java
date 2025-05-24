@@ -3,8 +3,7 @@ package utils;
 import java.io.*;
 import java.net.*;
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.locks.*;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.*;
 import Model.Message;
 
@@ -21,13 +20,11 @@ public class AIIntegration {
     private static final int MAX_RETRIES = 2;
     private static final int RETRY_DELAY_MS = 1000;
     
-    private static final ExecutorService aiExecutor = Executors.newVirtualThreadPerTaskExecutor();
-    private static final ScheduledExecutorService pollingExecutor = 
-        Executors.newScheduledThreadPool(1, Thread.ofVirtual().factory());
+    private static final ArrayList<Thread> activeThreads = new ArrayList<>();
+    private static final ReentrantLock threadLock = new ReentrantLock();
     
-    private static final int POLLING_INTERVAL_SECONDS = 5;
     private static volatile boolean isPollingActive = false;
-    private static ScheduledFuture<?> pollingTask = null;
+    private static Thread pollingThread = null;
     private static final ReentrantLock pollingLock = new ReentrantLock();
     
     public interface AIResponseCallback {
@@ -48,20 +45,20 @@ public class AIIntegration {
         }
         
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            LOGGER.info("Shutting down AI executor service");
-            aiExecutor.shutdown();
-            pollingExecutor.shutdown();
+            LOGGER.info("Shutting down AI integration");
+            threadLock.lock();
             try {
-                if (!aiExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    aiExecutor.shutdownNow();
+                for (Thread thread : activeThreads) {
+                    thread.interrupt();
+                    try {
+                        thread.join(5000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
-                if (!pollingExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                    pollingExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                aiExecutor.shutdownNow();
-                pollingExecutor.shutdownNow();
-                Thread.currentThread().interrupt();
+                activeThreads.clear();
+            } finally {
+                threadLock.unlock();
             }
         }));
     }
@@ -76,12 +73,12 @@ public class AIIntegration {
         
         if (!isOllamaAvailable) {
             LOGGER.warning("Ollama marked as unavailable, rejecting request");
-            startPollingIfNotActive(); 
+            startPollingIfNotActive();
             callback.onError("AI service is currently unavailable. Please try again later.", prompt);
             return;
         }
 
-        aiExecutor.submit(() -> {
+        Thread thread = Thread.ofVirtual().unstarted(() -> {
             try {
                 String cacheKey = buildCacheKey(prompt, conversationHistory);
                 String cachedResponse = null;
@@ -89,13 +86,14 @@ public class AIIntegration {
                 cacheLock.lock();
                 try {
                     cachedResponse = responseCache.get(cacheKey);
-                    if (cachedResponse != null) {
-                        LOGGER.info("Cache hit for prompt: " + prompt);
-                        callback.onResponseReceived(cachedResponse, prompt);
-                        return;
-                    }
                 } finally {
                     cacheLock.unlock();
+                }
+                
+                if (cachedResponse != null) {
+                    LOGGER.info("Cache hit for prompt: " + prompt);
+                    callback.onResponseReceived(cachedResponse, prompt);
+                    return;
                 }
                 
                 LOGGER.info("Processing new async query: " + prompt);
@@ -108,12 +106,7 @@ public class AIIntegration {
                     for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
                         if (attempt > 0) {
                             LOGGER.info("Retry attempt " + attempt + " for query");
-                            try {
-                                Thread.sleep(RETRY_DELAY_MS * attempt);
-                            } catch (InterruptedException e) {
-                                Thread.currentThread().interrupt();
-                                LOGGER.warning("Retry delay interrupted");
-                            }
+                            Thread.sleep(RETRY_DELAY_MS * attempt);
                         }
                         
                         response = sendRequest(requestBody);
@@ -137,7 +130,7 @@ public class AIIntegration {
                     callback.onResponseReceived(response, prompt);
                 } else {
                     LOGGER.severe("All retry attempts failed for: " + prompt);
-                    startPollingIfNotActive(); 
+                    startPollingIfNotActive();
                     callback.onError("Unable to get a response from the AI service after multiple attempts.", prompt);
                 }
             } catch (Exception e) {
@@ -146,6 +139,14 @@ public class AIIntegration {
                 callback.onError("Error processing AI request: " + e.getMessage(), prompt);
             }
         });
+
+        threadLock.lock();
+        try {
+            activeThreads.add(thread);
+            thread.start();
+        } finally {
+            threadLock.unlock();
+        }
     }
     
     public static String performQuery(String prompt, List<Message> conversationHistory) {
@@ -278,14 +279,30 @@ public class AIIntegration {
             if (!isPollingActive) {
                 LOGGER.info("Starting Ollama availability polling");
                 isPollingActive = true;
-                pollingTask = pollingExecutor.scheduleAtFixedRate(() -> {
-                    LOGGER.fine("Polling Ollama availability...");
-                    boolean available = pingOllama();
-                    if (available) {
-                        LOGGER.info("Ollama is now available");
-                        stopPollingIfActive();
+                pollingThread = Thread.ofVirtual().unstarted(() -> {
+                    while (isPollingActive && !Thread.interrupted()) {
+                        LOGGER.fine("Polling Ollama availability...");
+                        if (pingOllama()) {
+                            LOGGER.info("Ollama is now available");
+                            stopPollingIfActive();
+                            break;
+                        }
+                        try {
+                            Thread.sleep(5000); // Poll every 5 seconds
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
                     }
-                }, 0, POLLING_INTERVAL_SECONDS, TimeUnit.SECONDS);
+                });
+                
+                threadLock.lock();
+                try {
+                    activeThreads.add(pollingThread);
+                    pollingThread.start();
+                } finally {
+                    threadLock.unlock();
+                }
             }
         } finally {
             pollingLock.unlock();
@@ -295,11 +312,11 @@ public class AIIntegration {
     private static void stopPollingIfActive() {
         pollingLock.lock();
         try {
-            if (isPollingActive && pollingTask != null) {
+            if (isPollingActive && pollingThread != null) {
                 LOGGER.info("Stopping Ollama availability polling");
-                pollingTask.cancel(false);
                 isPollingActive = false;
-                pollingTask = null;
+                pollingThread.interrupt();
+                pollingThread = null;
             }
         } finally {
             pollingLock.unlock();
@@ -332,22 +349,27 @@ public class AIIntegration {
     }
 
     private static void scheduleCacheCleanup(String key) {
-        Thread.startVirtualThread(() -> {
+        Thread cleanupThread = Thread.ofVirtual().unstarted(() -> {
             try {
                 Thread.sleep(CACHE_TTL);
                 cacheLock.lock();
                 try {
-                    if (responseCache.remove(key) != null) {
-                        LOGGER.fine("Removed expired cache entry: " + key);
-                    }
+                    responseCache.remove(key);
                 } finally {
                     cacheLock.unlock();
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                LOGGER.warning("Cache cleanup interrupted");
             }
         });
+
+        threadLock.lock();
+        try {
+            activeThreads.add(cleanupThread);
+            cleanupThread.start();
+        } finally {
+            threadLock.unlock();
+        }
     }
 
     private static String buildContext(String prompt, List<Message> history) {

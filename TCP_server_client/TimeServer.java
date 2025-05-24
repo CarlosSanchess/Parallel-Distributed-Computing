@@ -1,55 +1,64 @@
 import java.io.*;
 import java.net.*;
 import java.util.*;
-import java.util.concurrent.*;
 import java.util.concurrent.locks.*;
-
 import javax.net.ssl.*;
 import java.security.*;
 
 import Model.*;
 import Model.Package;
 import Model.Client.ClientState;
-import utils.shaHash;
-import utils.AIIntegration;
-import utils.outputPrints;
-import utils.utils;
-import utils.TokenCleanupTask;
+import utils.*;
 
 public class TimeServer {
-    private List<Room> rooms;
+    private final ArrayList<Room> rooms;
+    private final ArrayList<Client> clients;
+    private final ArrayList<Thread> activeThreads;
     private int port;
-    private List<Client> clients;
     private boolean isRunning = true;
     private SSLServerSocket serverSocket = null;
     private final ReentrantLock lock = new ReentrantLock();
-    private final ExecutorService virtualThreadExecutor = 
-        Executors.newVirtualThreadPerTaskExecutor();
+    private final ReentrantLock threadLock = new ReentrantLock();
     private int nextClientId;
-    private final ScheduledExecutorService roomUpdateExecutor = Executors.newScheduledThreadPool(1);
-
 
     private static final String KEY_MANAGER_ALGORITHM = KeyManagerFactory.getDefaultAlgorithm();
     private static final String TRUST_MANAGER_ALGORITHM = TrustManagerFactory.getDefaultAlgorithm();
-    private static final String PROTOCOL = "TLSv1.3"; 
+    private static final String PROTOCOL = "TLSv1.3";
 
     public TimeServer(int port) {
-    this.rooms = new ArrayList<>();
-    this.port = port;
-    this.clients = new ArrayList<>();
-    initializeNextClientId();
+        this.rooms = new ArrayList<>();
+        this.clients = new ArrayList<>();
+        this.activeThreads = new ArrayList<>();
+        this.port = port;
+        initializeNextClientId();
 
-    // Shutdown hook for the room update executor
-    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-        roomUpdateExecutor.shutdown();
-        try {
-            if (!roomUpdateExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                roomUpdateExecutor.shutdownNow();
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            isRunning = false;
+            threadLock.lock();
+            try {
+                for (Thread thread : activeThreads) {
+                    try {
+                        thread.interrupt();
+                        thread.join(5000);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }
+            } finally {
+                threadLock.unlock();
             }
-        } catch (InterruptedException e) {
-            roomUpdateExecutor.shutdownNow();
-        }
-    }));
+        }));
+    }
+
+
+    private void submitTask(Runnable task) {
+    Thread thread = Thread.ofVirtual().start(task);
+    threadLock.lock();
+    try {
+        activeThreads.add(thread);
+    } finally {
+        threadLock.unlock();
+    }
 }
 
     private void initializeNextClientId() {
@@ -66,26 +75,35 @@ public class TimeServer {
     }
 
     private void safeExit() {
-        this.isRunning = false;
-        try {
-            if (serverSocket != null && !serverSocket.isClosed()) {
-                serverSocket.close();
-            }
-        } catch (IOException e) {
-            System.err.println("Error closing server socket: " + e.getMessage());
+    this.isRunning = false;
+    
+    // Close server socket
+    try {
+        if (serverSocket != null && !serverSocket.isClosed()) {
+            serverSocket.close();
         }
-
-        virtualThreadExecutor.shutdown();
-        try {
-            if (!virtualThreadExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
-                virtualThreadExecutor.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            virtualThreadExecutor.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
-        System.out.println("Server has shut down gracefully");
+    } catch (IOException e) {
+        System.err.println("Error closing server socket: " + e.getMessage());
     }
+    
+    // Stop all threads
+    threadLock.lock();
+    try {
+        for (Thread thread : activeThreads) {
+            try {
+                thread.interrupt();
+                thread.join(5000); // Wait up to 5 seconds for each thread
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        activeThreads.clear();
+    } finally {
+        threadLock.unlock();
+    }
+    
+    System.out.println("Server has shut down gracefully");
+}
 
     private String getKeystorePath() {
         String path = System.getenv("TIMESERVER_KEYSTORE_PATH");
@@ -154,21 +172,20 @@ public class TimeServer {
             System.out.println("Secure server is listening on port " + this.port);
             System.out.println("Using protocol: " + PROTOCOL);
             
+            // Start token cleanup thread
             TokenCleanupTask tokenCleanupTask = new TokenCleanupTask(lock);
-            Thread.ofVirtual()
+            Thread cleanupThread = Thread.ofVirtual()
                 .name("TokenCleanupThread")
                 .start(tokenCleanupTask);
             
             while (isRunning) {
                 SSLSocket socket = (SSLSocket) serverSocket.accept();
-                
                 socket.setEnabledCipherSuites(getStrongCipherSuites(socket.getSupportedCipherSuites()));
                 
-                virtualThreadExecutor.submit(() -> {
+                submitTask(() -> {
                     try {
                         socket.startHandshake();
                         System.out.println("SSL handshake completed with client: " + socket.getInetAddress());
-                        
                         handleRequest(socket);
                     } catch (IOException e) {
                         System.out.println("Handshake failed: " + e.getMessage());
@@ -182,11 +199,13 @@ public class TimeServer {
             }
             
             tokenCleanupTask.stop();
+            cleanupThread.join();
+            
         } catch (Exception ex) {
             System.out.println("Server exception: " + ex.getMessage());
             ex.printStackTrace();
         } finally {
-            virtualThreadExecutor.shutdown();
+            safeExit();
         }
     }
 
@@ -535,37 +554,44 @@ public class TimeServer {
     c.setSocket(sockClient);
     c.setState(ClientState.NOT_IN_ROOM);
 
-    // Schedule periodic main hub updates
-    ScheduledFuture<?> updateTask = roomUpdateExecutor.scheduleAtFixedRate(() -> {
-        if (c.getState() == ClientState.NOT_IN_ROOM && 
-            c.getSocket() != null && 
-            !c.getSocket().isClosed() &&
-            c.getState() != ClientState.WAITING) {
-            try {
-                lock.lock();
+    // Create and start the update thread
+    Thread updateThread = new Thread(() -> {
+        while (!Thread.interrupted() && c.getState() == ClientState.NOT_IN_ROOM) {
+            if (c.getSocket() != null && 
+                !c.getSocket().isClosed() &&
+                c.getState() != ClientState.WAITING) {
                 try {
-                    outputPrints.cleanClientTerminal(writer);
-                    writer.println("Welcome to xchat! (Secured with TLS)");
-                    writer.println("\nRooms Available:");
-                
-                    for (int i = 0; i < rooms.size(); i++) {
-                        Room r = rooms.get(i);
-                        String roomInfo = (i + 1) + ". " + r.getName() + " [" + 
-                            r.getMembers().size() + "/" + 
-                            (r.getMaxNumberOfMembers() == -1 ? "∞" : r.getMaxNumberOfMembers()) + "]";
-                        writer.println(roomInfo);
-                    }
+                    lock.lock();
+                    try {
+                        outputPrints.cleanClientTerminal(writer);
+                        writer.println("Welcome to xchat! (Secured with TLS)");
+                        writer.println("\nRooms Available:");
                     
-                    writer.println("\nTo join a room, type: /join <room number> or /create to create a room.");
-                } finally {
-                    lock.unlock();
+                        for (int i = 0; i < rooms.size(); i++) {
+                            Room r = rooms.get(i);
+                            String roomInfo = (i + 1) + ". " + r.getName() + " [" + 
+                                r.getMembers().size() + "/" + 
+                                (r.getMaxNumberOfMembers() == -1 ? "∞" : r.getMaxNumberOfMembers()) + "]";
+                            writer.println(roomInfo);
+                        }
+                        
+                        writer.println("\nTo join a room, type: /join <room number> or /create to create a room.");
+                    } finally {
+                        lock.unlock();
+                    }
+                    Thread.sleep(2000); // Update every 2 seconds
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    System.err.println("[ERROR] Failed to send periodic main hub update to " + 
+                        c.getName() + ": " + e.getMessage());
                 }
-            } catch (Exception e) {
-                System.err.println("[ERROR] Failed to send periodic main hub update to " + 
-                    c.getName() + ": " + e.getMessage());
             }
         }
-    }, 0, 2, TimeUnit.SECONDS);
+    });
+    
+    submitTask(updateThread);
 
     try {
         while (true) {
@@ -592,7 +618,7 @@ public class TimeServer {
                                 c.setRoom(selectedRoom.getId());
                                 c.setState(ClientState.IN_ROOM);
                                 broadcastMainHubUpdate(); // Update main hub for other users
-                                updateTask.cancel(false); // Stop main hub updates for this client
+                                updateThread.interrupt(); // Stop main hub updates for this client
                                 return;
                             } else {
                                 writer.println("Cannot join room - room might be full");
@@ -607,14 +633,14 @@ public class TimeServer {
                     writer.println("Invalid room number format");
                 }
             } else if (handleMainHubCommand(input, c, reader, writer, sockClient)) {
-                updateTask.cancel(false);
+                updateThread.interrupt();
                 return;
             }
         }
     } catch (IOException e) {
         System.err.println("[ERROR] Main hub error for " + c.getName() + ": " + e.getMessage());
     } finally {
-        updateTask.cancel(false);
+        updateThread.interrupt();
     }
 }
 
@@ -678,107 +704,83 @@ public class TimeServer {
     }
 }
     
-   private void showRoom(Client c, SSLSocket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
-    final Room finalRoom;  // Make room reference final
-    lock.lock();
-    try {
-        Room room = null;
-        for (Room r : rooms) {
-            if (r.getId() == roomId) {
-                room = r;
-                break;
-            }
-        }
-        finalRoom = room;  // Assign to final variable
-    } finally {
-        lock.unlock();
-    }
-
-    if (finalRoom == null) {
-        writer.println("Error: Room not found.");
-        System.out.println("[ERROR]: Room not found for ID: " + roomId);
-        c.setState(ClientState.NOT_IN_ROOM);
-        return;
-    }
-
-    // Set socket for broadcasting updates
-    c.setSocket(sockClient);
-    
-    final PrintWriter finalWriter = writer;  // Make writer reference final
-
-    // Schedule periodic room state updates
-    ScheduledFuture<?> updateTask = roomUpdateExecutor.scheduleAtFixedRate(() -> {
-        if (c.getSocket() != null && !c.getSocket().isClosed()) {
-            try {
-                lock.lock();
-                try {
-                    outputPrints.cleanClientTerminal(finalWriter);
-                    displayRoomState(finalRoom, finalWriter);
-                } finally {
-                    lock.unlock();
-                }
-            } catch (Exception e) {
-                System.err.println("[ERROR] Failed to send periodic update to " + c.getName() + ": " + e.getMessage());
-            }
-        }
-    }, 0, 2, TimeUnit.SECONDS);
-
-    boolean running = true;
-    while (running) {
+    private void showRoom(Client c, SSLSocket sockClient, int roomId, BufferedReader reader, PrintWriter writer) {
+        final Room finalRoom;
+        lock.lock();
         try {
-            Package pkg = Package.readInput(reader);
-            if (pkg == null) continue;
-            
-            String message = pkg.getMessage();
-            if (message == null || message.trim().isEmpty()) continue;
+            Room room = null;
+            for (Room r : rooms) {
+                if (r.getId() == roomId) {
+                    room = r;
+                    break;
+                }
+            }
+            finalRoom = room;
+        } finally {
+            lock.unlock();
+        }
 
-            if (message.equals("/quit") || message.equals("/exit")) {
+        if (finalRoom == null) {
+            writer.println("Error: Room not found.");
+            c.setState(ClientState.NOT_IN_ROOM);
+            return;
+        }
+
+        c.setSocket(sockClient);
+        UpdateThread updateThread = new UpdateThread(finalRoom, c, writer);
+        submitTask(updateThread);
+
+        boolean running = true;
+        while (running && isRunning) {
+            try {
+                Package pkg = Package.readInput(reader);
+                if (pkg == null) continue;
+                
+                String message = pkg.getMessage();
+                if (message == null || message.trim().isEmpty()) continue;
+
+                if (message.equals("/quit") || message.equals("/exit")) {
+                    lock.lock();
+                    try {
+                        finalRoom.removeMember(c);
+                        c.leaveRoom();
+                        c.setState(ClientState.NOT_IN_ROOM);
+                        writer.println("You have left the room.");
+                        broadcastRoomUpdate(finalRoom);
+                    } finally {
+                        lock.unlock();
+                    }
+                    running = false;
+                } else {
+                    lock.lock();
+                    try {
+                        Message newMessage = new Message(c.getName(), message);
+                        finalRoom.addMessage(newMessage);
+                        broadcastRoomUpdate(finalRoom);
+
+                        if (finalRoom.getIsAi()) {
+                            processAIResponseSync(finalRoom, message);
+                        }
+                    } finally {
+                        lock.unlock();
+                    }
+                }
+            } catch (IOException e) {
+                System.err.println("[ERROR] Room error: " + e.getMessage());
                 lock.lock();
                 try {
                     finalRoom.removeMember(c);
-                    c.leaveRoom();
-                    c.setState(ClientState.NOT_IN_ROOM);
-                    writer.println("You have left the room.");
                     broadcastRoomUpdate(finalRoom);
                 } finally {
                     lock.unlock();
                 }
                 running = false;
-            } else {
-                lock.lock();
-                try {
-                    Message newMessage = new Message(c.getName(), message);
-                    finalRoom.addMessage(newMessage);
-                    broadcastRoomUpdate(finalRoom);
-
-                    if (finalRoom.getIsAi()) {
-                        CountDownLatch responseLatch = new CountDownLatch(1);
-                        processAIResponseAsync(finalRoom, message, responseLatch);
-                        responseLatch.await(5, TimeUnit.SECONDS);
-                    }
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                } finally {
-                    lock.unlock();
-                }
             }
-        } catch (IOException e) {
-            System.err.println("[ERROR] Room error: " + e.getMessage());
-            lock.lock();
-            try {
-                finalRoom.removeMember(c);
-                broadcastRoomUpdate(finalRoom);
-            } finally {
-                lock.unlock();
-            }
-            running = false;
         }
-    }
 
-    // Cancel the periodic update task when leaving the room
-    updateTask.cancel(false);
-    c.setSocket(null);
-}
+        updateThread.stopThread();
+        c.setSocket(null);
+    }
 
 private void displayRoomState(Room room, PrintWriter writer) {
     writer.println("=== Room: " + room.getName() + " ===");
@@ -799,65 +801,52 @@ private void displayRoomState(Room room, PrintWriter writer) {
     writer.flush(); // Ensure all content is sent immediately
 }
 
-    private void processAIResponseAsync(Room room, String userMessage, CountDownLatch responseLatch) {
-    System.out.println("[INFO]: Processing asynchronous AI response for message: " + userMessage);
+    private void processAIResponseSync(Room room, String message) {
+    Object lock = new Object();
+    boolean[] completed = {false};
     
-    final String messageId = UUID.randomUUID().toString();
-    final Map<String, Boolean> processed = new ConcurrentHashMap<>();
-    processed.put(messageId, false);
-
-    lock.lock();
-    try {
-        room.addMessage(new Message("System", "Processing AI response..."));
-    } finally {
-        lock.unlock();
-    }
-
-    CompletableFuture.runAsync(() -> {
-        AIIntegration.processMessageAsync(userMessage, room.getMessages(), new AIIntegration.AIResponseCallback() {
-            @Override
-            public void onResponseReceived(String response, String originalMessage) {
-                if (!processed.getOrDefault(messageId, false)) {
-                    lock.lock();
-                    try {
-                        List<Message> messages = room.getMessages();
-                        messages.removeIf(msg -> msg.getAuthor().equals("System") && 
-                                               msg.getContent().equals("Processing AI response..."));
-                        
-                        room.addMessage(new Message("AI Bot", response));
-                        processed.put(messageId, true);
-                        System.out.println("[INFO]: AI response added for message: " + originalMessage);
-                    } finally {
-                        lock.unlock();
-                        responseLatch.countDown(); // Signal response received
+    Thread responseThread = Thread.ofVirtual().unstarted(() -> {
+        try {
+            AIIntegration.processMessageAsync(message, room.getMessages(), new AIIntegration.AIResponseCallback() {
+                @Override
+                public void onResponseReceived(String response, String originalMessage) {
+                    synchronized(lock) {
+                        room.addMessage(new Message("AI Assistant", response));
+                        broadcastRoomUpdate(room);
+                        completed[0] = true;
+                        lock.notify();
                     }
                 }
-            }
-            
-            @Override
-            public void onError(String errorMessage, String originalMessage) {
-                if (!processed.getOrDefault(messageId, false)) {
-                    lock.lock();
-                    try {
-                        List<Message> messages = room.getMessages();
-                        messages.removeIf(msg -> msg.getAuthor().equals("System") && 
-                                               msg.getContent().equals("Processing AI response..."));
-                        
-                        room.addMessage(new Message("System", "AI Error: " + errorMessage));
-                        processed.put(messageId, true);
-                    } finally {
-                        lock.unlock();
-                        responseLatch.countDown(); // Signal response received
+                
+                @Override
+                public void onError(String errorMessage, String originalMessage) {
+                    synchronized(lock) {
+                        room.addMessage(new Message("System", "Error: " + errorMessage));
+                        broadcastRoomUpdate(room);
+                        completed[0] = true;
+                        lock.notify();
                     }
                 }
+            });
+        } catch (Exception e) {
+            synchronized(lock) {
+                completed[0] = true;
+                lock.notify();
             }
-        });
-    }).exceptionally(throwable -> {
-        System.err.println("[ERROR] Async processing failed: " + throwable.getMessage());
-        throwable.printStackTrace();
-        responseLatch.countDown(); // Ensure latch is released on error
-        return null;
+        }
     });
+    
+    responseThread.start();
+    
+    synchronized(lock) {
+        try {
+            if (!completed[0]) {
+                lock.wait(5000); // Wait up to 5 seconds
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
 }
     
 
@@ -958,13 +947,16 @@ private void displayRoomState(Room room, PrintWriter writer) {
         Room r = new Room(roomId, name, maxMembers, isAiRoom);
         rooms.add(r);
         System.out.println("[INFO]: " + c.getName() + " created " + r.getName());
+        
+        // Add these lines to broadcast the update immediately
+        writer.println("\n✅ Room created successfully!");
+        utils.safeSleep(1000); // Delay for visibility
+        c.setState(ClientState.NOT_IN_ROOM);
+        broadcastMainHubUpdate(); // Broadcast update to all clients
+        return; // Add return to exit the method
     } finally {
         lock.unlock();
     }
-   
-    writer.println("\n✅ Room created successfully!");
-    utils.safeSleep(1000); // Increased delay for better visibility
-    c.setState(ClientState.NOT_IN_ROOM); // Reset state
 }
 
     private String checkInputWithDelay(BufferedReader reader, int delay) { //Provides a way to refresh the client and not just wait for the input
@@ -1021,4 +1013,50 @@ private void displayRoomState(Room room, PrintWriter writer) {
         return null;
     }
 }
+
+ private class UpdateThread extends Thread {
+        private volatile boolean running = true;
+        private final Room room;
+        private final Client client;
+        private final PrintWriter writer;
+        
+        public UpdateThread(Room room, Client client, PrintWriter writer) {
+            this.room = room;
+            this.client = client;
+            this.writer = writer;
+        }
+        
+        @Override
+        public void run() {
+            while (running && !Thread.interrupted()) {
+                try {
+                    if (client.getState() == ClientState.IN_ROOM && 
+                        client.getSocket() != null && 
+                        !client.getSocket().isClosed()) {
+                        
+                        lock.lock();
+                        try {
+                            outputPrints.cleanClientTerminal(writer);
+                            displayRoomState(room, writer);
+                        } finally {
+                            lock.unlock();
+                        }
+                    } else {
+                        break;
+                    }
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception e) {
+                    System.err.println("[ERROR] Update thread error: " + e.getMessage());
+                }
+            }
+        }
+        
+        public void stopThread() {
+            running = false;
+            interrupt();
+        }
+    }
 }

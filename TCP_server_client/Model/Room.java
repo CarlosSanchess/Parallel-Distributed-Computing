@@ -6,9 +6,9 @@ import java.util.ArrayList;
 
 public class Room {
 
-    private List<Client> members;
+    private final ArrayList<Client> members;
 
-    private List<Message> messages;
+    private final ArrayList<Message> messages;
 
     private int maxNumberOfMembers;
     
@@ -29,7 +29,7 @@ public class Room {
     }
 
 
-    public List<Client> getMembers() {
+    public ArrayList<Client> getMembers() {
         return members;
     }
 
@@ -37,11 +37,14 @@ public class Room {
         return name;
     }
     
-    public void setMembers(List<Client> members) {
-        this.members = members;
+    public void updateMembers(List<Client> members) {
+    synchronized(this.members) {
+        this.members.clear();
+        this.members.addAll(members);
     }
+}
 
-    public List<Message> getMessages() {
+    public ArrayList<Message> getMessages() {
         return messages;
     }
 
