@@ -1,7 +1,7 @@
 package Model;
 
 import java.net.InetAddress;
-import java.net.Socket;
+import javax.net.ssl.SSLSocket;
 
 public class Client {
     public enum ClientState {
@@ -20,7 +20,7 @@ public class Client {
     private ClientState state;
     private int roomId;
     private boolean isAi;
-    private transient Socket socket;
+    private transient SSLSocket socket;
 
     public Client(int clientId, InetAddress inetaddr, String userName, String hashedPassword, boolean isAi) {
         this.clientId = clientId;
@@ -51,11 +51,15 @@ public class Client {
     public int getRoomId() { return roomId; }
     public boolean isAi() { return isAi; }
     public boolean isAuth() { return isAuth; }
-    public Socket getSocket() { return socket; }
+    public void setSocket(SSLSocket socket) {
+        this.socket = socket;
+    }
 
+    public SSLSocket getSocket() {
+        return this.socket;
+    }
     public void setAuthTrue() { isAuth = true; }
     public void setState(ClientState cs) { state = cs; }
-    public void setSocket(Socket socket) { this.socket = socket; }
 
     public int setRoom(int RoomId) {
         if (state.equals(ClientState.NOT_IN_ROOM)) {
