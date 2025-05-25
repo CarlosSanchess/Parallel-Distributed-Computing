@@ -2,7 +2,6 @@ package Model;
 
 import java.io.BufferedReader;
 import java.io.IOException;
-import java.security.PKCS12Attribute;
 
 public class Package {
     private final String message;
@@ -55,7 +54,7 @@ public class Package {
         }
     }
 
-    public static Package readInput(BufferedReader br) {
+    public static Package readInput(BufferedReader br) throws IOException {
         try {
             String line = br.readLine();
             if (line == null) {
